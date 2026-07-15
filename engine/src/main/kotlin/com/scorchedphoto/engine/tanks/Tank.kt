@@ -1,5 +1,6 @@
 package com.scorchedphoto.engine.tanks
 
+import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.combat.WeaponType
 
 data class Tank(
@@ -18,6 +19,7 @@ data class Tank(
     var alive: Boolean = true,
     var falling: Boolean = false,
     var fallVelocity: Float = 0f,
+    val difficulty: Difficulty = Difficulty.MEDIUM,
 ) {
     companion object {
         const val MAX_HEALTH = 100

@@ -3,18 +3,28 @@ package com.scorchedphoto.app.game
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scorchedphoto.app.game.hud.HudOverlay
+import com.scorchedphoto.app.game.turntransition.PassDeviceScreen
+import com.scorchedphoto.engine.MatchPhase
 
-// TODO(Phase 9): react to uiState.winnerOwnerId via onMatchOver (navigate to Victory),
-// and auto-play CPU turns instead of waiting on HUD input a CPU tank never sends.
 @Composable
 fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel()) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(uiState.winnerOwnerId) {
+        if (uiState.winnerOwnerId != null) {
+            onMatchOver()
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
@@ -29,6 +39,23 @@ fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel
             },
             modifier = Modifier.fillMaxSize(),
         )
-        HudOverlay(uiState = uiState, onCommand = viewModel::submitCommand)
+
+        // Shown once per new human tank's turn (never for CPU turns) so the outgoing
+        // player doesn't see the incoming player's aim setup mid-transition.
+        var acknowledgedTankId by remember { mutableStateOf<Int?>(null) }
+        val needsPassDevice = uiState.phase == MatchPhase.AIMING &&
+            !uiState.currentTankIsCpu &&
+            uiState.currentTankId != null &&
+            uiState.currentTankId != acknowledgedTankId
+
+        if (needsPassDevice) {
+            val nextTankName = uiState.tanks.firstOrNull { it.id == uiState.currentTankId }?.name ?: "Player"
+            PassDeviceScreen(
+                nextPlayerName = nextTankName,
+                onReady = { acknowledgedTankId = uiState.currentTankId },
+            )
+        } else {
+            HudOverlay(uiState = uiState, onCommand = viewModel::submitCommand)
+        }
     }
 }

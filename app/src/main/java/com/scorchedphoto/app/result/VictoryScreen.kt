@@ -11,11 +11,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 
-// TODO(Phase 9): show winner/stats with Rematch / New Photo / Home actions.
 @Composable
-fun VictoryScreen(onRematch: () -> Unit, onNewPhoto: () -> Unit, onHome: () -> Unit) {
+fun VictoryScreen(
+    onRematch: () -> Unit,
+    onNewPhoto: () -> Unit,
+    onHome: () -> Unit,
+    viewModel: VictoryViewModel = hiltViewModel(),
+) {
     Scaffold { padding ->
         Column(
             modifier = Modifier
@@ -26,6 +32,16 @@ fun VictoryScreen(onRematch: () -> Unit, onNewPhoto: () -> Unit, onHome: () -> U
             verticalArrangement = Arrangement.Center,
         ) {
             Text("Victory!", style = MaterialTheme.typography.headlineMedium)
+            val winnerName = viewModel.winnerName
+            if (winnerName != null) {
+                val color = viewModel.winnerColor?.let { Color(it) } ?: Color.Unspecified
+                Text(
+                    text = winnerName,
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = color,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
             Button(onClick = onRematch, modifier = Modifier.padding(top = 24.dp)) {
                 Text("Rematch")
             }
