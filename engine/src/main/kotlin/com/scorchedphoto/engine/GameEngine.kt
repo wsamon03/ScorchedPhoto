@@ -41,6 +41,7 @@ class GameEngine(
         }
 
     private val activeProjectiles = mutableListOf<Projectile>()
+    private val activeImpactEffects = mutableListOf<ImpactEffect>()
 
     var phase: MatchPhase = MatchPhase.AIMING
         private set
@@ -50,6 +51,9 @@ class GameEngine(
 
     val currentTank: Tank? get() = turnManager.currentTank
     val projectiles: List<Projectile> get() = activeProjectiles
+
+    /** Short-lived flashes at recent impact points, for the renderer to fade out. */
+    val impactEffects: List<ImpactEffect> get() = activeImpactEffects
 
     init {
         for (tank in tanks) {
@@ -80,6 +84,7 @@ class GameEngine(
 
         tickProjectiles(dt)
         applyTankGravity(dt)
+        ageImpactEffects(dt)
 
         if (activeProjectiles.isEmpty() && tanks.none { it.falling }) {
             finishResolution()
@@ -128,6 +133,7 @@ class GameEngine(
 
     private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
         CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
+        activeImpactEffects += ImpactEffect(impactX, impactY)
         for (tank in tanks) {
             if (!tank.alive) continue
             val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)
@@ -176,6 +182,11 @@ class GameEngine(
         }
     }
 
+    private fun ageImpactEffects(dt: Float) {
+        activeImpactEffects.forEach { it.age += dt }
+        activeImpactEffects.removeAll { it.age > IMPACT_EFFECT_LIFETIME_SECONDS }
+    }
+
     private fun finishResolution() {
         val result = turnManager.checkWinCondition()
         if (result != null) {
@@ -191,5 +202,6 @@ class GameEngine(
     companion object {
         private const val TANK_HIT_RADIUS = 14f
         private const val FALL_SETTLE_EPSILON = 0.5f
+        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }
 }

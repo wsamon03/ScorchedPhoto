@@ -24,11 +24,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun PhotoSourceScreen(onPhotoReady: () -> Unit, viewModel: PhotoSourceViewModel = hiltViewModel()) {
     val context = LocalContext.current
     var showCamera by remember { mutableStateOf(false) }
+    var cameraPermissionDenied by remember { mutableStateOf(false) }
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
 
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
@@ -41,7 +44,12 @@ fun PhotoSourceScreen(onPhotoReady: () -> Unit, viewModel: PhotoSourceViewModel 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) showCamera = true
+        if (granted) {
+            cameraPermissionDenied = false
+            showCamera = true
+        } else {
+            cameraPermissionDenied = true
+        }
     }
 
     if (showCamera) {
@@ -92,6 +100,22 @@ fun PhotoSourceScreen(onPhotoReady: () -> Unit, viewModel: PhotoSourceViewModel 
                 modifier = Modifier.padding(top = 12.dp),
             ) {
                 Text("Choose from Gallery")
+            }
+
+            if (cameraPermissionDenied) {
+                Text(
+                    text = "Camera permission was denied. You can still pick a photo from " +
+                        "your gallery, or enable camera access for this app in system settings.",
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
+            }
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
             }
         }
     }

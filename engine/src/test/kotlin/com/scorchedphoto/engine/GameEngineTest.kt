@@ -105,6 +105,43 @@ class GameEngineTest {
     }
 
     @Test
+    fun `impact leaves a short-lived visual effect that eventually fades`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 700f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+
+        // 45 degrees / decent power clears the weapon's own blast radius so the shooter
+        // doesn't eliminate itself with self-splash damage on repeated re-fires below.
+        fun fireArcShot() {
+            val current = engine.currentTank!!
+            current.angleDeg = 45f
+            current.power = 30f
+            engine.fire()
+        }
+
+        fireArcShot()
+        var ticks = 0
+        while (engine.impactEffects.isEmpty() && ticks < 1000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertTrue("expected an impact effect to be recorded", engine.impactEffects.isNotEmpty())
+
+        // tick() is a no-op outside FIRING/RESOLVING, so aging pauses once a turn resolves;
+        // keep firing new (survivable) shots to keep ticking until the first flash fades.
+        var guard = 0
+        while (engine.impactEffects.isNotEmpty() && guard < 300 && engine.phase != MatchPhase.GAME_OVER) {
+            if (engine.phase == MatchPhase.AIMING) {
+                fireArcShot()
+            }
+            engine.tick(1f / 60f)
+            guard++
+        }
+        assertTrue("expected the impact effect to eventually fade", engine.impactEffects.isEmpty())
+    }
+
+    @Test
     fun `limited ammo weapon runs out after ammoLimit shots`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val a = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)

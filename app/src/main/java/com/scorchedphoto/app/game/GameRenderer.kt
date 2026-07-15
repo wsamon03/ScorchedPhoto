@@ -7,16 +7,19 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import com.scorchedphoto.engine.ImpactEffect
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.terrain.HeightMap
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
  * Draws one frame onto the [GameSurfaceView]'s [Canvas]: the photo as a backdrop, a dark
  * scar over any column craters have carved lower than the original terrain, projectiles,
- * and tanks with a barrel indicating aim and a small health bar.
+ * fading impact flashes, and tanks (body tilted to the local slope, a barrel indicating
+ * aim, and a small health bar).
  */
 class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntArray) {
 
@@ -34,12 +37,19 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         style = Paint.Style.STROKE
     }
     private val projectilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val impactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 255, 160, 40) }
     private val healthBarBackPaint = Paint().apply { color = Color.argb(180, 0, 0, 0) }
     private val healthBarFillPaint = Paint().apply { color = Color.argb(220, 60, 200, 60) }
 
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
-    fun draw(canvas: Canvas, terrain: HeightMap, tanks: List<Tank>, projectiles: List<Projectile>) {
+    fun draw(
+        canvas: Canvas,
+        terrain: HeightMap,
+        tanks: List<Tank>,
+        projectiles: List<Projectile>,
+        impactEffects: List<ImpactEffect>,
+    ) {
         canvas.drawColor(Color.BLACK)
         val scaleX = canvas.width.toFloat() / terrain.width
         val scaleY = canvas.height.toFloat() / terrain.height
@@ -50,6 +60,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         }
 
         drawCraterScars(canvas, terrain, scaleX, scaleY)
+        drawImpactEffects(canvas, impactEffects, scaleX, scaleY)
 
         for (projectile in projectiles) {
             canvas.drawCircle(projectile.x * scaleX, projectile.y * scaleY, PROJECTILE_RADIUS, projectilePaint)
@@ -57,7 +68,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
 
         for (tank in tanks) {
             if (!tank.alive) continue
-            drawTank(canvas, tank, scaleX, scaleY)
+            drawTank(canvas, tank, terrain, scaleX, scaleY)
         }
     }
 
@@ -82,13 +93,35 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         canvas.drawPath(path, craterPaint)
     }
 
-    private fun drawTank(canvas: Canvas, tank: Tank, scaleX: Float, scaleY: Float) {
+    private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, scaleX: Float, scaleY: Float) {
+        for (impact in impactEffects) {
+            val fadeFraction = (1f - impact.age / IMPACT_EFFECT_LIFETIME_SECONDS).coerceIn(0f, 1f)
+            if (fadeFraction <= 0f) continue
+            impactPaint.alpha = (fadeFraction * 255).toInt()
+            val radius = IMPACT_MAX_RADIUS * (1f - fadeFraction * 0.5f)
+            canvas.drawCircle(impact.x * scaleX, impact.y * scaleY, radius, impactPaint)
+        }
+        impactPaint.alpha = 255
+    }
+
+    private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, scaleX: Float, scaleY: Float) {
         val cx = tank.x * scaleX
         val cy = tank.y * scaleY
 
-        tankBodyPaint.color = tank.color
-        canvas.drawRect(cx - TANK_HALF_WIDTH, cy - TANK_HALF_WIDTH, cx + TANK_HALF_WIDTH, cy, tankBodyPaint)
+        val leftX = (tank.x - SLOPE_SAMPLE_OFFSET).toInt()
+        val rightX = (tank.x + SLOPE_SAMPLE_OFFSET).toInt()
+        val riseTerrain = (terrain.heightAt(rightX) - terrain.heightAt(leftX)).toFloat()
+        val slopeDeg = Math.toDegrees(
+            atan2((riseTerrain * scaleY).toDouble(), (2 * SLOPE_SAMPLE_OFFSET * scaleX).toDouble()),
+        ).toFloat()
 
+        tankBodyPaint.color = tank.color
+        canvas.save()
+        canvas.rotate(slopeDeg, cx, cy)
+        canvas.drawRect(cx - TANK_HALF_WIDTH, cy - TANK_HALF_WIDTH, cx + TANK_HALF_WIDTH, cy, tankBodyPaint)
+        canvas.restore()
+
+        // Barrel angle is an absolute aim reference, so it's drawn unrotated by slope.
         val angleRad = Math.toRadians(tank.angleDeg.toDouble())
         val direction = if (tank.facingRight) 1f else -1f
         val endX = cx + (cos(angleRad) * BARREL_LENGTH).toFloat() * direction
@@ -115,5 +148,8 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         private const val HEALTH_BAR_WIDTH = 32f
         private const val HEALTH_BAR_HEIGHT = 5f
         private const val HEALTH_BAR_GAP = 14f
+        private const val SLOPE_SAMPLE_OFFSET = 12
+        private const val IMPACT_MAX_RADIUS = 34f
+        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }
 }

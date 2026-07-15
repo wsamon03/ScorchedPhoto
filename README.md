@@ -44,3 +44,20 @@ preview line looks reasonable, start a mixed human + CPU match, fire a few shots
 different weapons, and verify craters carve visually, tanks fall when their ground is
 removed, wind changes (and visibly affects trajectory) each turn, and elimination /
 victory trigger correctly.
+
+## Status
+
+All ten implementation phases are done: project scaffold, terrain segmentation, physics
+engine, CPU aim AI, photo capture/selection, terrain preview, the real-time game shell,
+the firing HUD, CPU auto-play/pass-device transitions/victory screen, and a polish pass
+(tank slope rendering, fading impact flashes, decode/permission error handling).
+
+The `:app` module has **not** been build-verified in this repository's development
+environment, which has no Android SDK and no network access to Google's Maven
+repository (see "Building" above) — only `:terrain`/`:engine` (65 unit tests) have
+actually been compiled and run. The Compose/CameraX/SurfaceView code was written
+carefully against known-correct APIs, but it should be built and manually smoke-tested
+on a real machine with an Android SDK before being treated as verified.
+
+Not implemented (explicitly optional in the original plan): sound effects, haptics, and
+a settings screen.
