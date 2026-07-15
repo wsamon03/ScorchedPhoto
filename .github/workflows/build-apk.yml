@@ -32,6 +32,13 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # Ruling out cache corruption: this branch has now been built with three
+          # different AGP/Kotlin/Gradle combinations in a row, all hitting the identical
+          # "decorated class ... BaseVariant" failure regardless of the actual version
+          # change - forcing a fully clean ~/.gradle checks whether a stale/corrupted
+          # cached artifact transform from an earlier attempt is what's actually at fault.
+          cache-disabled: true
 
       - name: Make gradlew executable
         run: chmod +x gradlew
