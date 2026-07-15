@@ -27,9 +27,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -46,14 +43,13 @@ jobs:
       - name: Run pure-logic unit tests
         run: ./gradlew :terrain:test :engine:test --no-daemon
 
+      - name: Dump buildscript/plugin classpath (diagnostic)
+        if: always()
+        run: ./gradlew :app:buildEnvironment --no-daemon --no-configure-on-demand
+        continue-on-error: true
+
       - name: Build debug APK
-        # --no-configure-on-demand: gradle.properties turns configure-on-demand on so
-        # :terrain/:engine (kotlin("jvm") modules) never need AGP resolvable - useful in
-        # sandboxes without Google Maven access, irrelevant here, and configure-on-demand
-        # is suspected of causing the "decorated class ... BaseVariant" plugin-application
-        # failure seen in prior runs regardless of which Kotlin/AGP/Gradle versions were
-        # used (the one constant across every failed attempt).
-        run: ./gradlew :app:assembleDebug --no-daemon --no-configure-on-demand
+        run: ./gradlew :app:assembleDebug --no-daemon --no-configure-on-demand --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
