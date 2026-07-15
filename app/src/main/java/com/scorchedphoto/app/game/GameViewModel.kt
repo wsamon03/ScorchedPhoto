@@ -6,6 +6,7 @@ import com.scorchedphoto.app.capture.PhotoRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.engine.GameEngine
+import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.TankPlacement
@@ -13,8 +14,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlin.random.Random
+import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject.Inject
+import kotlin.random.Random
 
 @HiltViewModel
 class GameViewModel @Inject constructor(
@@ -25,6 +27,9 @@ class GameViewModel @Inject constructor(
 
     val engine: GameEngine
     val backgroundPhoto: Bitmap? = photoRepository.workingPhoto
+
+    /** HUD -> engine intents, drained exclusively by [GameLoopThread]. */
+    val commandQueue = ConcurrentLinkedQueue<GameCommand>()
 
     private val _uiState = MutableStateFlow(GameUiState())
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
@@ -55,11 +60,26 @@ class GameViewModel @Inject constructor(
         publishState()
     }
 
+    fun submitCommand(command: GameCommand) {
+        commandQueue.offer(command)
+    }
+
     /** Called by [GameLoopThread] after each tick; safe to call from any thread. */
     fun publishState() {
+        val current = engine.currentTank
         _uiState.value = GameUiState(
             phase = engine.phase,
-            currentTankId = engine.currentTank?.id,
+            currentTankId = current?.id,
+            currentTankIsCpu = current?.isCpu ?: false,
+            currentAngleDeg = current?.angleDeg ?: 45f,
+            currentPower = current?.power ?: 50f,
+            weapons = WeaponCatalog.all.map { weapon ->
+                WeaponHudInfo(
+                    weaponType = weapon.type,
+                    ammoRemaining = current?.let { engine.ammoFor(it.id, weapon.type) },
+                    selected = current?.currentWeapon == weapon.type,
+                )
+            },
             tanks = engine.tanks.map { TankHudInfo(it.id, it.name, it.color, it.health, it.alive) },
             windVelocity = engine.wind.velocity,
             winnerOwnerId = engine.winResult?.winningOwnerId,

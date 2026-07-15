@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import com.scorchedphoto.engine.GameEngine
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * The real-time rendering surface, embedded into Compose via
@@ -16,6 +17,7 @@ class GameSurfaceView(
     context: Context,
     private val engine: GameEngine,
     photo: Bitmap?,
+    private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
@@ -28,7 +30,7 @@ class GameSurfaceView(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        val thread = GameLoopThread(holder, engine, renderer, onStateChanged)
+        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged)
         thread.running = true
         thread.start()
         loopThread = thread

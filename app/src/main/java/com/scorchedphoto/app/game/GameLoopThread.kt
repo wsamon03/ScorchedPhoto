@@ -2,16 +2,20 @@ package com.scorchedphoto.app.game
 
 import android.view.SurfaceHolder
 import com.scorchedphoto.engine.GameEngine
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
- * Fixed-timestep game loop on its own thread: ticks [engine] independent of draw rate
- * (accumulator pattern), draws every frame via [renderer], and calls [onStateChanged]
- * only every few frames so the Compose HUD isn't rebuilt 60 times a second.
+ * Fixed-timestep game loop on its own thread: drains queued [GameCommand]s, ticks
+ * [engine] independent of draw rate (accumulator pattern), draws every frame via
+ * [renderer], and calls [onStateChanged] only every few frames so the Compose HUD isn't
+ * rebuilt 60 times a second. This is the only thread that ever mutates engine state once
+ * the surface is live, so HUD input reaches it exclusively through [commandQueue].
  */
 class GameLoopThread(
     private val surfaceHolder: SurfaceHolder,
     private val engine: GameEngine,
     private val renderer: GameRenderer,
+    private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
 ) : Thread("GameLoopThread") {
 
@@ -27,6 +31,8 @@ class GameLoopThread(
             val frameStartNanos = System.nanoTime()
             accumulator += (frameStartNanos - lastNanos) / 1_000_000_000f
             lastNanos = frameStartNanos
+
+            drainAndApplyCommands()
 
             var ticked = false
             while (accumulator >= FIXED_DT) {
@@ -59,6 +65,18 @@ class GameLoopThread(
                 } catch (_: InterruptedException) {
                     // `running` being flipped false is what actually ends the loop.
                 }
+            }
+        }
+    }
+
+    private fun drainAndApplyCommands() {
+        while (true) {
+            val command = commandQueue.poll() ?: break
+            when (command) {
+                is GameCommand.SetAngle -> engine.currentTank?.angleDeg = command.angleDeg
+                is GameCommand.SetPower -> engine.currentTank?.power = command.power
+                is GameCommand.SetWeapon -> engine.currentTank?.currentWeapon = command.weaponType
+                GameCommand.Fire -> engine.fire()
             }
         }
     }
