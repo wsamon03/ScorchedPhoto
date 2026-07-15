@@ -1,34 +1,28 @@
 package com.scorchedphoto.app.game
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.hilt.navigation.compose.hiltViewModel
 
-// TODO(Phase 7/8): host AndroidView(GameSurfaceView) as the base layer plus the Compose HUD overlay.
+// TODO(Phase 8): add the Compose HUD overlay (angle/power sliders, wind indicator,
+// health bars, weapon selector, fire button) on top of the AndroidView below, driven by
+// viewModel.uiState. TODO(Phase 9): react to uiState.winnerOwnerId via onMatchOver.
 @Composable
-fun GameScreen(onMatchOver: () -> Unit) {
-    Scaffold { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("Match in Progress", style = MaterialTheme.typography.headlineMedium)
-            Button(onClick = onMatchOver, modifier = Modifier.padding(top = 24.dp)) {
-                Text("End Match")
-            }
-        }
+fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel()) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { context ->
+                GameSurfaceView(
+                    context = context,
+                    engine = viewModel.engine,
+                    photo = viewModel.backgroundPhoto,
+                    onStateChanged = viewModel::publishState,
+                )
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
