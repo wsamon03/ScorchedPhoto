@@ -32,6 +32,16 @@ works — `:app`'s build script is never configured in that case as long as you 
 `--configure-on-demand` (already the default here via `gradle.properties`). The second
 command will fail for that infrastructure reason, not a code-correctness one.
 
+## Getting an installable APK without a local Android SDK
+
+The `Build Debug APK` GitHub Actions workflow (`.github/workflows/build-apk.yml`) builds
+on every push to `main`/`claude/**` and on demand, and uploads the debug APK as a build
+artifact. To get it onto a phone: open the workflow run under the repo's **Actions** tab,
+download the `scorched-photo-debug-apk` artifact (a zip containing the `.apk`), then open
+that file on the phone and allow "install unknown apps" for whichever app you downloaded
+it through. It's a debug build (unsigned, not for Play Store distribution) meant for
+sideloaded testing.
+
 ## Manual verification (needs a device/emulator)
 
 ```
