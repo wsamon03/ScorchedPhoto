@@ -15,12 +15,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Runs the bundled ADE20K-scene-parsing TFLite model and extracts the sky-class
- * channel as a per-pixel likelihood map. [MODEL_INPUT_SIZE]/[MODEL_OUTPUT_SIZE],
- * [NUM_CLASSES] and [SKY_CLASS_INDEX] describe the currently bundled model's actual
- * I/O contract - they must be re-checked against that model's own metadata/label map
- * (e.g. via Netron) whenever the asset is replaced, not assumed from the generic
- * SceneParse150 convention.
+ * Runs the bundled ADE20K-scene-parsing TFLite model and extracts a per-pixel
+ * "background" likelihood map - not just the literal sky class, but the sum of a
+ * curated set of enclosing/background-like classes ([BACKGROUND_CLASS_INDICES]: sky,
+ * wall, ceiling, door, window, curtain). A single sky class only covers outdoor
+ * landscape photos; summing this broader set is what lets an indoor photo (e.g. toys
+ * on a table against a wall) still produce a sensible boundary - the wall registers as
+ * background, the table/toys don't.
+ *
+ * [MODEL_INPUT_SIZE]/[MODEL_OUTPUT_SIZE], [NUM_CLASSES] and [BACKGROUND_CLASS_INDICES]
+ * describe the currently bundled model's actual I/O contract - they must be
+ * re-checked against that model's own metadata/label map (e.g. via Netron) whenever
+ * the asset is replaced, not assumed from the generic SceneParse150 convention.
  */
 @Singleton
 class TfliteSkySegmentationModel @Inject constructor(
@@ -39,7 +45,7 @@ class TfliteSkySegmentationModel @Inject constructor(
     }
 
     /** Blocking - callers must invoke this off the main thread. */
-    fun predictSkyLikelihood(buffer: PixelBuffer): Array<FloatArray> {
+    fun predictBackgroundLikelihood(buffer: PixelBuffer): Array<FloatArray> {
         synchronized(lock) {
             return try {
                 val model = interpreter ?: loadInterpreter().also { interpreter = it }
@@ -70,7 +76,13 @@ class TfliteSkySegmentationModel @Inject constructor(
         interpreter.run(tensorImage.buffer, output)
 
         val modelLikelihood = Array(MODEL_OUTPUT_SIZE) { y ->
-            FloatArray(MODEL_OUTPUT_SIZE) { x -> output[0][y][x].getOrElse(SKY_CLASS_INDEX) { 0f } }
+            FloatArray(MODEL_OUTPUT_SIZE) { x ->
+                var backgroundProbability = 0f
+                for (classIndex in BACKGROUND_CLASS_INDICES) {
+                    backgroundProbability += output[0][y][x].getOrElse(classIndex) { 0f }
+                }
+                backgroundProbability
+            }
         }
         return resizeLikelihood(modelLikelihood, MODEL_OUTPUT_SIZE, MODEL_OUTPUT_SIZE, buffer.width, buffer.height)
     }
@@ -116,9 +128,25 @@ class TfliteSkySegmentationModel @Inject constructor(
         const val MODEL_INPUT_SIZE = 257
         const val MODEL_OUTPUT_SIZE = 257
         const val NUM_CLASSES = 151
-        const val SKY_CLASS_INDEX = 3
         const val NUM_THREADS = 4
         const val INPUT_MEAN = 0f
         const val INPUT_STD = 255f
+
+        // ADE20K SceneParse150 classes treated as "background" (open air / an enclosing
+        // surface) rather than "ground" (an object, or the surface it rests on).
+        // Indices follow the standard 1-indexed 150-class label order
+        // (https://github.com/CSAILVision/sceneparsing/blob/master/objectInfo150.csv)
+        // with output channel 0 reserved for background/void, i.e. class N's
+        // probability is at channel index N. Re-verify this whole list against the
+        // actual bundled model's own label map once sourced - do not assume it
+        // blindly matches every ADE20K export.
+        val BACKGROUND_CLASS_INDICES = intArrayOf(
+            3, // sky
+            1, // wall
+            6, // ceiling
+            15, // door;double door
+            9, // windowpane;window
+            19, // curtain;drape;drapery;mantle;pall
+        )
     }
 }
