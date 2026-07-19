@@ -1,0 +1,9 @@
+sky_segmentation.tflite
+
+Model: DeepLabV3 (MobileNetV2 backbone), trained on the ADE20K scene-parsing
+dataset. Sourced from Kaggle Models: spsayakpaul/deeplabv3-mobilenetv2/tfLite/ade20k.
+
+Author: TensorFlow
+License: Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)
+
+(License and authorship as declared in the model's own embedded TFLite metadata.)
