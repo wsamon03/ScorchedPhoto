@@ -101,4 +101,78 @@ class TerrainSegmenterTest {
         val minAllowed = (height * 0.08).toInt()
         assertTrue(map.groundY.all { it >= minAllowed })
     }
+
+    @Test
+    fun `tracks a sloped boundary instead of only ever finding a flat line`() {
+        val width = 200
+        val height = 200
+        // Max slope ~1.9px/column, well under the DP's row-jump budget (~8px/column at
+        // this resolution) - this is the core "does it actually follow the shape"
+        // assertion the seam-search redesign exists for.
+        val (buffer, expectedBoundary) = slopedHorizonBuffer(width, height, baseY = 100, amplitude = 30, cycles = 2.0)
+
+        val map = TerrainSegmenter.segment(buffer)
+
+        var totalAbsoluteError = 0.0
+        for (x in 0 until width) {
+            val error = abs(map.groundY[x] - expectedBoundary[x])
+            totalAbsoluteError += error
+            assertTrue("column $x groundY=${map.groundY[x]} too far from expected ${expectedBoundary[x]}", error < 15)
+        }
+        val meanAbsoluteError = totalAbsoluteError / width
+        assertTrue("mean absolute error $meanAbsoluteError too high", meanAbsoluteError < 8)
+    }
+
+    @Test
+    fun `textured ground does not pull the boundary or misfire as noise`() {
+        val width = 200
+        val height = 200
+        val skyRows = 80
+        val buffer = texturedGroundHorizonBuffer(width, height, skyRows, noiseSeed = 42L)
+
+        val map = TerrainSegmenter.segment(buffer)
+
+        val average = map.groundY.average()
+        assertTrue(
+            "expected average groundY near $skyRows despite ground texture, was $average",
+            abs(average - skyRows) < 25,
+        )
+    }
+
+    @Test
+    fun `bright low-saturation ground under a brighter sky is not merged into one region`() {
+        // Under the old fixed threshold (luminance > 0.62) both this sky (~0.98) and
+        // this ground (~0.71) would pass the sky-like test and collapse into one region.
+        val width = 200
+        val height = 200
+        val skyRows = 80
+        val buffer = brightGroundHorizonBuffer(width, height, skyRows)
+
+        val map = TerrainSegmenter.segment(buffer)
+
+        val average = map.groundY.average()
+        assertTrue(
+            "expected average groundY near $skyRows, was $average (adaptive threshold likely not splitting bright-on-bright)",
+            abs(average - skyRows) < 25,
+        )
+    }
+
+    @Test
+    fun `adjacent-column deltas stay bounded on non-trivial input`() {
+        val width = 200
+        val height = 200
+        val fixtures = listOf(
+            slopedHorizonBuffer(width, height, baseY = 100, amplitude = 30, cycles = 2.0).first,
+            texturedGroundHorizonBuffer(width, height, skyRows = 80, noiseSeed = 7L),
+            brightGroundHorizonBuffer(width, height, skyRows = 80),
+        )
+
+        for (buffer in fixtures) {
+            val map = TerrainSegmenter.segment(buffer)
+            for (x in 1 until width) {
+                val delta = abs(map.groundY[x] - map.groundY[x - 1])
+                assertTrue("large jump at column $x: $delta", delta < 15)
+            }
+        }
+    }
 }
