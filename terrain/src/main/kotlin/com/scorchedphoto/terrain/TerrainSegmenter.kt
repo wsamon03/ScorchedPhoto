@@ -1,7 +1,6 @@
 package com.scorchedphoto.terrain
 
 import kotlin.math.abs
-import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -9,14 +8,13 @@ import kotlin.math.sqrt
 
 /**
  * Turns a photo into a [HeightMap] by finding, per column, where solid ground gives
- * way to sky/backdrop. Pure classical image processing - no ML, no network - so it
- * runs entirely on-device and is unit-testable with synthetic pixel buffers.
+ * way to sky/backdrop.
  *
  * Algorithm:
  *  1. Downscale for analysis (speed).
- *  2. Sobel edge magnitude, plus a soft per-pixel "sky-likelihood" score from luminance
- *     and saturation, thresholded adaptively per-photo via Otsu's method rather than
- *     fixed absolute cutoffs (so it isn't only calibrated for one lighting condition).
+ *  2. Sobel edge magnitude, plus a soft per-pixel "sky-likelihood" score supplied by
+ *     an injected [SkySignalProvider] - classical luminance/saturation heuristics by
+ *     default, or a real ML model on Android (see `:app`'s `ml` package).
  *  3. A regional transition score (sky-like above, non-sky-like below, in a small
  *     window) that identifies genuine sky/ground transitions and lets internal ground
  *     texture (grass, gravel) be told apart from the real boundary.
@@ -35,17 +33,6 @@ object TerrainSegmenter {
 
     private const val ANALYSIS_LONG_EDGE = 320
 
-    private const val SKY_LUMINANCE_DEFAULT = 0.62f
-    private const val SKY_LUMINANCE_MIN = 0.45f
-    private const val SKY_LUMINANCE_MAX = 0.85f
-    private const val SKY_SATURATION_DEFAULT = 0.25f
-    private const val SKY_SATURATION_MIN = 0.10f
-    private const val SKY_SATURATION_MAX = 0.45f
-    private const val OTSU_HISTOGRAM_BINS = 64
-    private const val OTSU_MIN_SPREAD = 1e-3f
-
-    private const val SKY_LUM_SOFTNESS = 0.08f
-    private const val SKY_SAT_SOFTNESS = 0.08f
     private const val TRANSITION_WINDOW = 4
 
     private const val COST_EDGE_WEIGHT = 0.5f
@@ -61,30 +48,15 @@ object TerrainSegmenter {
     private const val MEDIAN_WINDOW = 3
     private const val MIN_SKY_HEADROOM_FRACTION = 0.08f
 
-    fun segment(buffer: PixelBuffer, seed: Long = 0L): HeightMap {
+    fun segment(
+        buffer: PixelBuffer,
+        seed: Long = 0L,
+        skySignalProvider: SkySignalProvider = ClassicalSkySignalProvider,
+    ): HeightMap {
         val analysis = boxDownscale(buffer, ANALYSIS_LONG_EDGE)
         val edges = sobelEdgeMagnitude(analysis)
 
-        val luminanceValues = FloatArray(analysis.width * analysis.height) { i ->
-            analysis.luminance(i % analysis.width, i / analysis.width)
-        }
-        val saturationValues = FloatArray(analysis.width * analysis.height) { i ->
-            analysis.saturation(i % analysis.width, i / analysis.width)
-        }
-        val lumThreshold = adaptiveThreshold(
-            luminanceValues,
-            SKY_LUMINANCE_DEFAULT,
-            SKY_LUMINANCE_MIN,
-            SKY_LUMINANCE_MAX,
-        )
-        val satThreshold = adaptiveThreshold(
-            saturationValues,
-            SKY_SATURATION_DEFAULT,
-            SKY_SATURATION_MIN,
-            SKY_SATURATION_MAX,
-        )
-
-        val skyLikelihood = skyLikelihoodMap(analysis, lumThreshold, satThreshold)
+        val skyLikelihood = skySignalProvider.skyLikelihood(analysis)
         val transition = transitionScoreMap(skyLikelihood, analysis.width, analysis.height)
         val cost = buildCostMap(edges, transition, analysis.width, analysis.height)
 
@@ -156,73 +128,6 @@ object TerrainSegmenter {
                 val gx = -tl + tr - 2f * ml + 2f * mr - bl + br
                 val gy = -tl - 2f * tc - tr + bl + 2f * bc + br
                 (sqrt(gx * gx + gy * gy) / 8f).coerceIn(0f, 1f)
-            }
-        }
-    }
-
-    /**
-     * Otsu's method: finds the value that best splits [values] into two classes by
-     * maximizing between-class variance. Returns NaN if the values have near-zero
-     * spread (a flat/uniform image), which the caller treats as "no reliable split
-     * exists here, use the default constant."
-     */
-    private fun otsuThreshold(values: FloatArray, bins: Int = OTSU_HISTOGRAM_BINS): Float {
-        var minV = Float.MAX_VALUE
-        var maxV = -Float.MAX_VALUE
-        for (v in values) {
-            if (v < minV) minV = v
-            if (v > maxV) maxV = v
-        }
-        val range = maxV - minV
-        if (range < OTSU_MIN_SPREAD) return Float.NaN
-
-        val histogram = IntArray(bins)
-        for (v in values) {
-            val bin = (((v - minV) / range) * (bins - 1)).roundToInt().coerceIn(0, bins - 1)
-            histogram[bin]++
-        }
-
-        val total = values.size
-        var sumAll = 0.0
-        for (bin in 0 until bins) sumAll += bin.toDouble() * histogram[bin]
-
-        var sumBackground = 0.0
-        var weightBackground = 0
-        var bestVariance = -1.0
-        var bestBin = 0
-        for (bin in 0 until bins) {
-            weightBackground += histogram[bin]
-            if (weightBackground == 0) continue
-            val weightForeground = total - weightBackground
-            if (weightForeground == 0) break
-
-            sumBackground += bin.toDouble() * histogram[bin]
-            val meanBackground = sumBackground / weightBackground
-            val meanForeground = (sumAll - sumBackground) / weightForeground
-            val diff = meanBackground - meanForeground
-            val between = weightBackground.toDouble() * weightForeground * diff * diff
-            if (between > bestVariance) {
-                bestVariance = between
-                bestBin = bin
-            }
-        }
-        return minV + (bestBin.toFloat() / (bins - 1)) * range
-    }
-
-    private fun adaptiveThreshold(values: FloatArray, default: Float, lo: Float, hi: Float): Float {
-        val otsu = otsuThreshold(values)
-        return if (otsu.isNaN()) default else otsu.coerceIn(lo, hi)
-    }
-
-    private fun sigmoid(x: Float): Float = (1.0 / (1.0 + exp(-x.toDouble()))).toFloat()
-
-    /** Continuous [0,1] "how much does this pixel look like sky" score. */
-    private fun skyLikelihoodMap(buffer: PixelBuffer, lumThreshold: Float, satThreshold: Float): Array<FloatArray> {
-        return Array(buffer.height) { y ->
-            FloatArray(buffer.width) { x ->
-                val lumTerm = sigmoid((buffer.luminance(x, y) - lumThreshold) / SKY_LUM_SOFTNESS)
-                val satTerm = sigmoid((satThreshold - buffer.saturation(x, y)) / SKY_SAT_SOFTNESS)
-                lumTerm * satTerm
             }
         }
     }

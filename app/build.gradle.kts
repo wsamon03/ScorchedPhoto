@@ -36,6 +36,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    androidResources {
+        // The Interpreter memory-maps this asset directly; it must not be re-compressed.
+        noCompress += "tflite"
+    }
 }
 
 dependencies {
@@ -70,6 +75,9 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    implementation(libs.tensorflow.lite)
+    implementation(libs.tensorflow.lite.support)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

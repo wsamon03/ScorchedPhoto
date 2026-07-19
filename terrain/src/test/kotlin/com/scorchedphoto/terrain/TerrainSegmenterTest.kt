@@ -3,6 +3,8 @@ package com.scorchedphoto.terrain
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class TerrainSegmenterTest {
 
@@ -174,5 +176,45 @@ class TerrainSegmenterTest {
                 assertTrue("large jump at column $x: $delta", delta < 15)
             }
         }
+    }
+
+    @Test
+    fun `injected sky signal provider drives the boundary, not pixel content`() {
+        val width = 200
+        val height = 200
+        // A single flat color has ~zero real Sobel edges anywhere - if the result still
+        // tracks this sloped boundary, the DP/cost-map plumbing is following the injected
+        // provider rather than the (edge-less) pixel content.
+        val boundary = IntArray(width) { x ->
+            (100 + 30 * sin(2.0 * Math.PI * 2.0 * x / width)).roundToInt().coerceIn(0, height - 1)
+        }
+        val buffer = uniformBuffer(width, height, groundColor())
+
+        val map = TerrainSegmenter.segment(buffer, skySignalProvider = FakeSkySignalProvider(boundary))
+
+        var totalAbsoluteError = 0.0
+        for (x in 0 until width) {
+            totalAbsoluteError += abs(map.groundY[x] - boundary[x])
+        }
+        val meanAbsoluteError = totalAbsoluteError / width
+        assertTrue("mean absolute error $meanAbsoluteError too high", meanAbsoluteError < 8)
+    }
+
+    @Test
+    fun `different sky signal providers on the same buffer produce different boundaries`() {
+        val width = 200
+        val height = 200
+        val buffer = uniformBuffer(width, height, groundColor())
+
+        val lowBoundary = IntArray(width) { 30 }
+        val highBoundary = IntArray(width) { 160 }
+
+        val lowMap = TerrainSegmenter.segment(buffer, skySignalProvider = FakeSkySignalProvider(lowBoundary))
+        val highMap = TerrainSegmenter.segment(buffer, skySignalProvider = FakeSkySignalProvider(highBoundary))
+
+        assertTrue(
+            "expected the two providers to produce clearly different average groundY",
+            highMap.groundY.average() - lowMap.groundY.average() > 50,
+        )
     }
 }
