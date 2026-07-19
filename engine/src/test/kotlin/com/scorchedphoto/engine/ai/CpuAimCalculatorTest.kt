@@ -3,6 +3,7 @@ package com.scorchedphoto.engine.ai
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
+import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
@@ -17,8 +18,16 @@ class CpuAimCalculatorTest {
 
     private fun flatTerrain(width: Int, groundY: Int) = HeightMap(width, groundY + 200, IntArray(width) { groundY })
 
-    private fun replay(shooter: Tank, terrain: HeightMap, angleDeg: Float, power: Float, facingRight: Boolean, wind: Wind): Float {
-        val (vx, vy) = launchVelocity(angleDeg, power, facingRight)
+    private fun replay(
+        shooter: Tank,
+        terrain: HeightMap,
+        angleDeg: Float,
+        power: Float,
+        facingRight: Boolean,
+        wind: Wind,
+        healthMultiplier: Float = 1f,
+    ): Float {
+        val (vx, vy) = launchVelocity(angleDeg, power, facingRight, healthMultiplier)
         val p = Projectile(shooter.x, shooter.y, vx, vy, WeaponCatalog.STANDARD_SHELL, shooter.id)
         var t = 0f
         while (t < 10f) {
@@ -88,5 +97,22 @@ class CpuAimCalculatorTest {
         }
 
         assertTrue(hardErrors.average() < easyErrors.average())
+    }
+
+    @Test
+    fun `ideal solve still lands on target when the shooter is injured`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, x = 400f, y = 500f, health = 40)
+        val target = testTank(id = 2, x = 750f, y = 500f)
+        val wind = Wind(0f)
+
+        val power = CpuAimCalculator.solveIdealPower(shooter, target, terrain, wind)
+        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
+        val landingX = replay(shooter, terrain, 45f, power, facingRight = true, wind = wind, healthMultiplier = healthMultiplier)
+
+        assertTrue(
+            "expected landing near ${target.x}, got $landingX (power=$power, healthMultiplier=$healthMultiplier)",
+            abs(landingX - target.x) < 15f,
+        )
     }
 }

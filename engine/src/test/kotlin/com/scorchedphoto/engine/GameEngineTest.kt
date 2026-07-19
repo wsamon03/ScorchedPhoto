@@ -10,6 +10,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.hypot
 import kotlin.random.Random
 
 class GameEngineTest {
@@ -211,5 +212,30 @@ class GameEngineTest {
         assertTrue("expected the ground under the bystander to be carved lower", surfaceAfter > surfaceBefore)
         assertEquals(surfaceAfter.toFloat(), bystander.y, 0.6f)
         assertFalse(bystander.falling)
+    }
+
+    @Test
+    fun `an injured tank fires at reduced power`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val healthyShooter = testTank(id = 1, ownerId = 1, x = 300f, health = 100)
+        val healthyTarget = testTank(id = 2, ownerId = 2, x = 700f)
+        val halfHealthShooter = testTank(id = 1, ownerId = 1, x = 300f, health = 50)
+        val halfHealthTarget = testTank(id = 2, ownerId = 2, x = 700f)
+
+        val healthyEngine = GameEngine(terrain, listOf(healthyShooter, healthyTarget), maxWindMagnitude = 0f, rng = Random(1))
+        healthyShooter.angleDeg = 45f
+        healthyShooter.power = 80f
+        healthyShooter.facingRight = true
+        healthyEngine.fire()
+        val healthySpeed = healthyEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
+
+        val injuredEngine = GameEngine(terrain, listOf(halfHealthShooter, halfHealthTarget), maxWindMagnitude = 0f, rng = Random(1))
+        halfHealthShooter.angleDeg = 45f
+        halfHealthShooter.power = 80f
+        halfHealthShooter.facingRight = true
+        injuredEngine.fire()
+        val injuredSpeed = injuredEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
+
+        assertEquals(healthySpeed * 0.75, injuredSpeed, healthySpeed * 0.01)
     }
 }

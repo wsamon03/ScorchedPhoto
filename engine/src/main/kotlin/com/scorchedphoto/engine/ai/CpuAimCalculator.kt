@@ -3,6 +3,7 @@ package com.scorchedphoto.engine.ai
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
+import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
@@ -80,7 +81,8 @@ object CpuAimCalculator {
         facingRight: Boolean,
         wind: Wind,
     ): Float? {
-        val (vx, vy) = launchVelocity(angleDeg, power, facingRight)
+        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
+        val (vx, vy) = launchVelocity(angleDeg, power, facingRight, healthMultiplier)
         val projectile = Projectile(shooter.x, shooter.y, vx, vy, WeaponCatalog.STANDARD_SHELL, shooter.id)
         var elapsed = 0f
         while (elapsed < MAX_SIMULATION_SECONDS) {

@@ -6,6 +6,7 @@ import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
+import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
@@ -73,7 +74,8 @@ class GameEngine(
             if (remaining <= 0) return false
             ammoRemaining[shooter.id]?.set(weapon.type, remaining - 1)
         }
-        val (vx, vy) = launchVelocity(shooter.angleDeg, shooter.power, shooter.facingRight)
+        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
+        val (vx, vy) = launchVelocity(shooter.angleDeg, shooter.power, shooter.facingRight, healthMultiplier)
         activeProjectiles += Projectile(shooter.x, shooter.y, vx, vy, weapon, shooter.id)
         phase = MatchPhase.FIRING
         return true

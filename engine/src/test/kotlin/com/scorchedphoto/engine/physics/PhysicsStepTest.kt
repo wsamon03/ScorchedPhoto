@@ -91,4 +91,67 @@ class PhysicsStepTest {
         assertEquals(-right.first, left.first, 0.01f)
         assertEquals(right.second, left.second, 0.01f)
     }
+
+    private fun rangeAtFullPower(angleDeg: Float): Float {
+        val (vx, vy) = launchVelocity(angleDeg, power = 100f, facingRight = true)
+        val p = projectile(vx, vy)
+        val wind = Wind(0f)
+        val dt = 1f / 1000f
+        var t = 0f
+        // y=0 at launch and increases downward, so the projectile starts *at* the y<0f
+        // boundary - step at least once before using that as the "landed" condition.
+        do {
+            stepProjectile(p, wind, dt)
+            t += dt
+        } while (p.y < 0f && t < 30f)
+        return p.x
+    }
+
+    @Test
+    fun `full-power max range is 4x what it was before the range buff`() {
+        // POWER_SCALE was doubled (6 -&gt; 12) to quadruple range, since range is
+        // proportional to speed^2. Recompute the old range from first principles (not by
+        // hardcoding a POWER_SCALE value) so this test documents intent rather than
+        // just re-asserting whatever the constant happens to be.
+        val oldPowerScale = POWER_SCALE / 2f
+        val oldSpeed = 100f * oldPowerScale
+        val angleRad = Math.toRadians(45.0)
+        val oldRange = (oldSpeed * oldSpeed * kotlin.math.sin(2 * angleRad) / GRAVITY).toFloat()
+
+        val newRange = rangeAtFullPower(45f)
+
+        assertTrue(
+            "expected ~4x the old range ($oldRange), was $newRange",
+            abs(newRange - 4f * oldRange) < 4f * oldRange * 0.02f,
+        )
+    }
+
+    @Test
+    fun `healthPowerMultiplier is 1 at full health`() {
+        assertEquals(1f, healthPowerMultiplier(health = 100, maxHealth = 100), 0.001f)
+    }
+
+    @Test
+    fun `healthPowerMultiplier is 0_75 at half health`() {
+        assertEquals(0.75f, healthPowerMultiplier(health = 50, maxHealth = 100), 0.001f)
+    }
+
+    @Test
+    fun `healthPowerMultiplier floors at 0_5 when health reaches zero`() {
+        assertEquals(0.5f, healthPowerMultiplier(health = 0, maxHealth = 100), 0.001f)
+    }
+
+    @Test
+    fun `healthPowerMultiplier is clamped for out-of-range health`() {
+        assertEquals(1f, healthPowerMultiplier(health = 150, maxHealth = 100), 0.001f)
+        assertEquals(0.5f, healthPowerMultiplier(health = -20, maxHealth = 100), 0.001f)
+    }
+
+    @Test
+    fun `launchVelocity scales speed by healthMultiplier`() {
+        val full = launchVelocity(angleDeg = 30f, power = 80f, facingRight = true, healthMultiplier = 1f)
+        val half = launchVelocity(angleDeg = 30f, power = 80f, facingRight = true, healthMultiplier = 0.75f)
+        assertEquals(full.first * 0.75f, half.first, 0.01f)
+        assertEquals(full.second * 0.75f, half.second, 0.01f)
+    }
 }
