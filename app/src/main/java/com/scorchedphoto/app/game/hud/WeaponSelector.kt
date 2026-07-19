@@ -19,8 +19,13 @@ private fun WeaponType.displayName(): String = when (this) {
 }
 
 @Composable
-fun WeaponSelector(weapons: List<WeaponHudInfo>, enabled: Boolean, onCommand: (GameCommand) -> Unit) {
-    Row {
+fun WeaponSelector(
+    weapons: List<WeaponHudInfo>,
+    enabled: Boolean,
+    onCommand: (GameCommand) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier) {
         weapons.forEach { weapon ->
             val outOfAmmo = weapon.ammoRemaining == 0
             FilterChip(

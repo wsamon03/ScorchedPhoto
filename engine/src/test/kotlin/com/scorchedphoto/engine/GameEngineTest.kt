@@ -36,7 +36,6 @@ class GameEngineTest {
         assertEquals(1, engine.currentTank?.id)
         a.angleDeg = 80f
         a.power = 20f
-        a.facingRight = true
         assertTrue(engine.fire())
         assertEquals(MatchPhase.FIRING, engine.phase)
 
@@ -56,7 +55,6 @@ class GameEngineTest {
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
         shooter.angleDeg = 45f
         shooter.power = idealPower
-        shooter.facingRight = true
 
         val healthBefore = target.health
         val terrainBefore = terrain.groundY.copyOf()
@@ -86,9 +84,8 @@ class GameEngineTest {
             val current = engine.currentTank!!
             if (current.id == shooter.id) {
                 val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
-                shooter.angleDeg = 45f
+                shooter.angleDeg = if (target.x >= shooter.x) 45f else 135f
                 shooter.power = idealPower
-                shooter.facingRight = target.x >= shooter.x
             } else {
                 // Fires straight up so it can never hit back and skew the test.
                 target.angleDeg = 90f
@@ -202,7 +199,6 @@ class GameEngineTest {
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, aimTarget, terrain, engine.wind)
         shooter.angleDeg = 45f
         shooter.power = idealPower
-        shooter.facingRight = true
 
         val surfaceBefore = terrain.heightAt(bystander.x.toInt())
         engine.fire()
@@ -225,17 +221,62 @@ class GameEngineTest {
         val healthyEngine = GameEngine(terrain, listOf(healthyShooter, healthyTarget), maxWindMagnitude = 0f, rng = Random(1))
         healthyShooter.angleDeg = 45f
         healthyShooter.power = 80f
-        healthyShooter.facingRight = true
         healthyEngine.fire()
         val healthySpeed = healthyEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
 
         val injuredEngine = GameEngine(terrain, listOf(halfHealthShooter, halfHealthTarget), maxWindMagnitude = 0f, rng = Random(1))
         halfHealthShooter.angleDeg = 45f
         halfHealthShooter.power = 80f
-        halfHealthShooter.facingRight = true
         injuredEngine.fire()
         val injuredSpeed = injuredEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
 
         assertEquals(healthySpeed * 0.75, injuredSpeed, healthySpeed * 0.01)
+    }
+
+    @Test
+    fun `firing at an angle past 90 degrees lands to the shooter's left`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 500f)
+        val bystander = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
+        val engine = GameEngine(terrain, listOf(shooter, bystander), maxWindMagnitude = 0f, rng = Random(1))
+
+        val terrainBefore = terrain.groundY.copyOf()
+        shooter.angleDeg = 135f // up and to the left, no facingRight involved anymore
+        shooter.power = 20f // modest power so the shot lands well inside the terrain, not off the edge
+        engine.fire()
+        runUntilNotResolving(engine)
+
+        // A crater carved to the left of the shooter's start x is only possible if the
+        // projectile actually traveled left, confirming the full-circle angle (not a
+        // legacy facingRight flag) determines direction.
+        assertTrue(
+            "expected a crater to the shooter's left of x=500",
+            (0..480).any { x -> terrain.groundY[x] > terrainBefore[x] },
+        )
+    }
+
+    @Test
+    fun `firing straight down from an elevated tank lands near its own position`() {
+        // A tall step: shooter stands on a plateau, bystander sits in the low valley next
+        // to it - a 270-degree ("straight down") shot should carve a crater right at the
+        // shooter's own x, the "fire down into a valley" case this feature exists for.
+        val width = 1000
+        val plateauY = 300
+        val valleyY = 500
+        val groundY = IntArray(width) { x -> if (x < 520) plateauY else valleyY }
+        val terrain = HeightMap(width, valleyY + 200, groundY)
+        val shooter = testTank(id = 1, ownerId = 1, x = 400f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, rng = Random(1))
+
+        val terrainBefore = terrain.groundY.copyOf()
+        shooter.angleDeg = 270f
+        shooter.power = 20f
+        engine.fire()
+        runUntilNotResolving(engine)
+
+        assertTrue(
+            "expected a crater near the shooter's own x=400",
+            (370..430).any { x -> terrain.groundY[x] > terrainBefore[x] },
+        )
     }
 }

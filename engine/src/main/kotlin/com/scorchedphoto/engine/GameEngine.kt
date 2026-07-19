@@ -75,7 +75,7 @@ class GameEngine(
             ammoRemaining[shooter.id]?.set(weapon.type, remaining - 1)
         }
         val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
-        val (vx, vy) = launchVelocity(shooter.angleDeg, shooter.power, shooter.facingRight, healthMultiplier)
+        val (vx, vy) = launchVelocity(shooter.angleDeg, shooter.power, healthMultiplier)
         activeProjectiles += Projectile(shooter.x, shooter.y, vx, vy, weapon, shooter.id)
         phase = MatchPhase.FIRING
         return true

@@ -23,11 +23,10 @@ class CpuAimCalculatorTest {
         terrain: HeightMap,
         angleDeg: Float,
         power: Float,
-        facingRight: Boolean,
         wind: Wind,
         healthMultiplier: Float = 1f,
     ): Float {
-        val (vx, vy) = launchVelocity(angleDeg, power, facingRight, healthMultiplier)
+        val (vx, vy) = launchVelocity(angleDeg, power, healthMultiplier)
         val p = Projectile(shooter.x, shooter.y, vx, vy, WeaponCatalog.STANDARD_SHELL, shooter.id)
         var t = 0f
         while (t < 10f) {
@@ -52,7 +51,8 @@ class CpuAimCalculatorTest {
                     val wind = Wind(windVelocity)
 
                     val power = CpuAimCalculator.solveIdealPower(shooter, target, terrain, wind)
-                    val landingX = replay(shooter, terrain, 45f, power, facingRight, wind)
+                    val angleDeg = if (facingRight) 45f else 135f
+                    val landingX = replay(shooter, terrain, angleDeg, power, wind)
 
                     assertTrue(
                         "distance=$distance wind=$windVelocity facingRight=$facingRight " +
@@ -89,11 +89,11 @@ class CpuAimCalculatorTest {
 
         val easyErrors = (0 until 50).map { seed ->
             val aim = CpuAimCalculator.computeAim(shooter, target, terrain, wind, Difficulty.EASY, Random(seed.toLong()))
-            abs(replay(shooter, terrain, aim.angleDeg, aim.power, true, wind) - target.x)
+            abs(replay(shooter, terrain, aim.angleDeg, aim.power, wind) - target.x)
         }
         val hardErrors = (0 until 50).map { seed ->
             val aim = CpuAimCalculator.computeAim(shooter, target, terrain, wind, Difficulty.HARD, Random(seed.toLong()))
-            abs(replay(shooter, terrain, aim.angleDeg, aim.power, true, wind) - target.x)
+            abs(replay(shooter, terrain, aim.angleDeg, aim.power, wind) - target.x)
         }
 
         assertTrue(hardErrors.average() < easyErrors.average())
@@ -108,11 +108,27 @@ class CpuAimCalculatorTest {
 
         val power = CpuAimCalculator.solveIdealPower(shooter, target, terrain, wind)
         val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
-        val landingX = replay(shooter, terrain, 45f, power, facingRight = true, wind = wind, healthMultiplier = healthMultiplier)
+        val landingX = replay(shooter, terrain, 45f, power, wind = wind, healthMultiplier = healthMultiplier)
 
         assertTrue(
             "expected landing near ${target.x}, got $landingX (power=$power, healthMultiplier=$healthMultiplier)",
             abs(landingX - target.x) < 15f,
         )
+    }
+
+    @Test
+    fun `aiming at a target to the shooter's left mirrors into the 95-175 degree range`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, x = 700f, y = 500f)
+        val target = testTank(id = 2, x = 300f, y = 500f)
+        val wind = Wind(0f)
+
+        repeat(20) { seed ->
+            val aim = CpuAimCalculator.computeAim(shooter, target, terrain, wind, Difficulty.EASY, Random(seed.toLong()))
+            assertTrue(
+                "expected a leftward-mirrored angle in (95,175), was ${aim.angleDeg}",
+                aim.angleDeg in 95f..175f,
+            )
+        }
     }
 }

@@ -14,7 +14,6 @@ data class Tank(
     var health: Int = MAX_HEALTH,
     var angleDeg: Float = 45f,
     var power: Float = 50f,
-    var facingRight: Boolean = true,
     var currentWeapon: WeaponType = WeaponType.STANDARD_SHELL,
     var alive: Boolean = true,
     var falling: Boolean = false,

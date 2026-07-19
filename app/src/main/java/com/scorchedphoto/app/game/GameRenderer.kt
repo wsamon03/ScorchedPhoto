@@ -122,9 +122,10 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         canvas.restore()
 
         // Barrel angle is an absolute aim reference, so it's drawn unrotated by slope.
+        // Full-circle convention matches PhysicsStep.launchVelocity exactly - no separate
+        // facing flag, cos/sin alone cover all four quadrants.
         val angleRad = Math.toRadians(tank.angleDeg.toDouble())
-        val direction = if (tank.facingRight) 1f else -1f
-        val endX = cx + (cos(angleRad) * BARREL_LENGTH).toFloat() * direction
+        val endX = cx + (cos(angleRad) * BARREL_LENGTH).toFloat()
         val endY = cy - (sin(angleRad) * BARREL_LENGTH).toFloat()
         canvas.drawLine(cx, cy, endX, endY, barrelPaint)
 

@@ -9,7 +9,7 @@ import com.scorchedphoto.engine.combat.WeaponType
  */
 sealed interface GameCommand {
     data class SetAngle(val angleDeg: Float) : GameCommand
-    data class SetPower(val power: Float) : GameCommand
     data class SetWeapon(val weaponType: WeaponType) : GameCommand
-    data object Fire : GameCommand
+    /** Fires immediately at [power] - the hold-to-charge gesture is a single atomic intent. */
+    data class FireWithPower(val power: Float) : GameCommand
 }

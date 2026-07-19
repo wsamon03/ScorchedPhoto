@@ -71,29 +71,43 @@ class PhysicsStepTest {
     }
 
     @Test
-    fun `launchVelocity at 0 degrees is purely horizontal`() {
-        val (vx, vy) = launchVelocity(angleDeg = 0f, power = 50f, facingRight = true)
+    fun `launchVelocity at 0 degrees is purely horizontal, pointing right`() {
+        val (vx, vy) = launchVelocity(angleDeg = 0f, power = 50f)
         assertTrue(vx > 0f)
         assertEquals(0f, vy, 0.01f)
     }
 
     @Test
-    fun `launchVelocity at 90 degrees is purely vertical`() {
-        val (vx, vy) = launchVelocity(angleDeg = 90f, power = 50f, facingRight = true)
+    fun `launchVelocity at 90 degrees is purely vertical, pointing up`() {
+        val (vx, vy) = launchVelocity(angleDeg = 90f, power = 50f)
         assertEquals(0f, vx, 0.01f)
         assertTrue(vy < 0f)
     }
 
     @Test
-    fun `launchVelocity facing left mirrors horizontal component`() {
-        val right = launchVelocity(angleDeg = 30f, power = 50f, facingRight = true)
-        val left = launchVelocity(angleDeg = 30f, power = 50f, facingRight = false)
+    fun `launchVelocity at 180 degrees mirrors the horizontal component of 0 degrees`() {
+        val right = launchVelocity(angleDeg = 0f, power = 50f)
+        val left = launchVelocity(angleDeg = 180f, power = 50f)
         assertEquals(-right.first, left.first, 0.01f)
         assertEquals(right.second, left.second, 0.01f)
     }
 
+    @Test
+    fun `launchVelocity at 270 degrees is purely vertical, pointing down`() {
+        val (vx, vy) = launchVelocity(angleDeg = 270f, power = 50f)
+        assertEquals(0f, vx, 0.01f)
+        assertTrue(vy > 0f)
+    }
+
+    @Test
+    fun `launchVelocity at 135 degrees fires up and to the left`() {
+        val (vx, vy) = launchVelocity(angleDeg = 135f, power = 50f)
+        assertTrue(vx < 0f)
+        assertTrue(vy < 0f)
+    }
+
     private fun rangeAtFullPower(angleDeg: Float): Float {
-        val (vx, vy) = launchVelocity(angleDeg, power = 100f, facingRight = true)
+        val (vx, vy) = launchVelocity(angleDeg, power = 100f)
         val p = projectile(vx, vy)
         val wind = Wind(0f)
         val dt = 1f / 1000f
@@ -149,9 +163,60 @@ class PhysicsStepTest {
 
     @Test
     fun `launchVelocity scales speed by healthMultiplier`() {
-        val full = launchVelocity(angleDeg = 30f, power = 80f, facingRight = true, healthMultiplier = 1f)
-        val half = launchVelocity(angleDeg = 30f, power = 80f, facingRight = true, healthMultiplier = 0.75f)
+        val full = launchVelocity(angleDeg = 30f, power = 80f, healthMultiplier = 1f)
+        val half = launchVelocity(angleDeg = 30f, power = 80f, healthMultiplier = 0.75f)
         assertEquals(full.first * 0.75f, half.first, 0.01f)
         assertEquals(full.second * 0.75f, half.second, 0.01f)
+    }
+
+    @Test
+    fun `normalizeAngleDeg wraps into 0-360`() {
+        assertEquals(0f, normalizeAngleDeg(0f), 0.001f)
+        assertEquals(0f, normalizeAngleDeg(360f), 0.001f)
+        assertEquals(10f, normalizeAngleDeg(370f), 0.001f)
+        assertEquals(330f, normalizeAngleDeg(-30f), 0.001f)
+        assertEquals(180f, normalizeAngleDeg(-180f), 0.001f)
+    }
+
+    @Test
+    fun `screenOffsetToAngleDeg maps the four cardinal drag directions`() {
+        // Screen space: y increases downward, so "up" is negative dy.
+        assertEquals(0f, screenOffsetToAngleDeg(dx = 10f, dy = 0f), 0.01f)
+        assertEquals(90f, screenOffsetToAngleDeg(dx = 0f, dy = -10f), 0.01f)
+        assertEquals(180f, screenOffsetToAngleDeg(dx = -10f, dy = 0f), 0.01f)
+        assertEquals(270f, screenOffsetToAngleDeg(dx = 0f, dy = 10f), 0.01f)
+    }
+
+    @Test
+    fun `screenOffsetToAngleDeg maps a diagonal drag`() {
+        // Up and to the right, equal magnitude -> 45 degrees.
+        assertEquals(45f, screenOffsetToAngleDeg(dx = 10f, dy = -10f), 0.01f)
+    }
+
+    @Test
+    fun `screenOffsetToAngleDeg does not crash for a zero-length drag`() {
+        assertEquals(0f, screenOffsetToAngleDeg(dx = 0f, dy = 0f), 0.01f)
+    }
+
+    @Test
+    fun `oscillatingPower starts at 0, peaks at the half period, and wraps`() {
+        val period = 2f
+        assertEquals(0f, oscillatingPower(0f, period), 0.01f)
+        assertEquals(100f, oscillatingPower(period / 2f, period), 0.5f)
+        assertEquals(0f, oscillatingPower(period, period), 0.5f)
+        assertEquals(50f, oscillatingPower(period / 4f, period), 0.5f)
+        // Held well past one period: the oscillation keeps going, not stuck at an edge.
+        assertEquals(100f, oscillatingPower(period * 2.5f, period), 0.5f)
+    }
+
+    @Test
+    fun `oscillatingPower stays within 0-100 across a dense sweep`() {
+        val period = POWER_CHARGE_PERIOD_SECONDS
+        var t = 0f
+        while (t < period * 5f) {
+            val value = oscillatingPower(t, period)
+            assertTrue("oscillatingPower($t) = $value out of [0,100]", value in 0f..100f)
+            t += 0.01f
+        }
     }
 }

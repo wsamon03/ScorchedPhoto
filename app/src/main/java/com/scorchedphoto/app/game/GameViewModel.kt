@@ -88,6 +88,10 @@ class GameViewModel @Inject constructor(
             currentTankIsCpu = current?.isCpu ?: false,
             currentAngleDeg = current?.angleDeg ?: 45f,
             currentPower = current?.power ?: 50f,
+            currentTankX = current?.x ?: 0f,
+            currentTankY = current?.y ?: 0f,
+            terrainWidth = engine.terrain.width,
+            terrainHeight = engine.terrain.height,
             weapons = WeaponCatalog.all.map { weapon ->
                 WeaponHudInfo(
                     weaponType = weapon.type,

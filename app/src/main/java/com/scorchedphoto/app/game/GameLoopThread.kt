@@ -4,6 +4,7 @@ import android.view.SurfaceHolder
 import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.ai.CpuAimCalculator
+import com.scorchedphoto.engine.physics.normalizeAngleDeg
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
@@ -105,7 +106,6 @@ class GameLoopThread(
         val aim = CpuAimCalculator.computeAim(current, target, engine.terrain, engine.wind, current.difficulty, cpuRandom)
         current.angleDeg = aim.angleDeg
         current.power = aim.power
-        current.facingRight = target.x >= current.x
         engine.fire()
         cpuThinkingForTankId = null
     }
@@ -114,10 +114,12 @@ class GameLoopThread(
         while (true) {
             val command = commandQueue.poll() ?: break
             when (command) {
-                is GameCommand.SetAngle -> engine.currentTank?.angleDeg = command.angleDeg
-                is GameCommand.SetPower -> engine.currentTank?.power = command.power
+                is GameCommand.SetAngle -> engine.currentTank?.angleDeg = normalizeAngleDeg(command.angleDeg)
                 is GameCommand.SetWeapon -> engine.currentTank?.currentWeapon = command.weaponType
-                GameCommand.Fire -> engine.fire()
+                is GameCommand.FireWithPower -> {
+                    engine.currentTank?.power = command.power
+                    engine.fire()
+                }
             }
         }
     }

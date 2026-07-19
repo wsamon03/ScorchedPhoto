@@ -25,6 +25,11 @@ data class GameUiState(
     val currentTankIsCpu: Boolean = false,
     val currentAngleDeg: Float = 45f,
     val currentPower: Float = 50f,
+    /** Current tank's world position, for the [com.scorchedphoto.app.game.hud.AngleRing] overlay. */
+    val currentTankX: Float = 0f,
+    val currentTankY: Float = 0f,
+    val terrainWidth: Int = 1,
+    val terrainHeight: Int = 1,
     val weapons: List<WeaponHudInfo> = emptyList(),
     val tanks: List<TankHudInfo> = emptyList(),
     val windVelocity: Float = 0f,
