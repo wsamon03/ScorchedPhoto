@@ -20,7 +20,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private val RING_RADIUS = 36.dp
-private val TOUCH_RADIUS = 70.dp
+internal val TOUCH_RADIUS = 70.dp
 private val RING_STROKE_WIDTH = 3.dp
 private val HIGHLIGHT_DOT_RADIUS = 7.dp
 

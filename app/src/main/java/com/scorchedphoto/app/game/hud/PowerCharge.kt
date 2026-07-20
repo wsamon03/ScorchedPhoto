@@ -6,9 +6,12 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -117,5 +120,33 @@ fun PowerChargeButton(state: PowerChargeState, onCommand: (GameCommand) -> Unit,
             }
         }
         Text("Fire", color = Color.White)
+    }
+}
+
+val POWER_METER_WIDTH = 18.dp
+val POWER_METER_HEIGHT = 120.dp
+val POWER_METER_HORIZONTAL_GAP = 16.dp
+
+/**
+ * A prominent vertical power gauge, visible only while [state] is actively charging -
+ * positioned by the caller (see [HudOverlay]) near the tank rather than tucked in a
+ * corner, so charging power is easy to read without looking away from the aim.
+ */
+@Composable
+fun PowerMeterBar(state: PowerChargeState, modifier: Modifier = Modifier) {
+    if (!state.isCharging) return
+
+    Box(
+        modifier = modifier
+            .size(width = POWER_METER_WIDTH, height = POWER_METER_HEIGHT)
+            .background(Color.Black.copy(alpha = 0.35f), RoundedCornerShape(POWER_METER_WIDTH / 2)),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .fillMaxHeight(state.displayPower / 100f)
+                .background(Color(0xFFFFB020), RoundedCornerShape(POWER_METER_WIDTH / 2)),
+        )
     }
 }
