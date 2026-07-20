@@ -144,12 +144,18 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     companion object {
         private const val CRATER_STROKE_WIDTH = 40f
         private const val PROJECTILE_RADIUS = 5f
-        private const val TANK_HALF_WIDTH = 14f
-        private const val BARREL_LENGTH = 26f
-        private const val HEALTH_BAR_WIDTH = 32f
-        private const val HEALTH_BAR_HEIGHT = 5f
-        private const val HEALTH_BAR_GAP = 14f
-        private const val SLOPE_SAMPLE_OFFSET = 12
+
+        // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
+        // so the visual size and the actual collision size never drift apart. The rest of
+        // these scale proportionally with it (4x the old 14f-radius tuning: barrel 26->104,
+        // health bar 32x5->128x20, gap 14->56, slope sample offset 12->48).
+        private const val TANK_HALF_WIDTH = Tank.RADIUS
+        private const val BARREL_LENGTH = 104f
+        private const val HEALTH_BAR_WIDTH = 128f
+        private const val HEALTH_BAR_HEIGHT = 20f
+        private const val HEALTH_BAR_GAP = 56f
+        private const val SLOPE_SAMPLE_OFFSET = 48
+
         private const val IMPACT_MAX_RADIUS = 34f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }

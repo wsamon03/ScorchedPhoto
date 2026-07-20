@@ -22,5 +22,13 @@ data class Tank(
 ) {
     companion object {
         const val MAX_HEALTH = 100
+
+        /**
+         * Half-width of the tank body / direct-hit collision radius, in the same
+         * working-image pixel scale as [com.scorchedphoto.engine.physics.GRAVITY] etc.
+         * Shared by rendering (`GameRenderer`) and hit detection (`GameEngine`) so the
+         * two always agree on how big a tank actually is - was 14f, 4x'd to 56f.
+         */
+        const val RADIUS = 56f
     }
 }

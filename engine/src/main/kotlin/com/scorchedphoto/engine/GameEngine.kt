@@ -118,7 +118,7 @@ class GameEngine(
             }
 
             when {
-                hitTank != null -> resolveImpact(p, hitTank.x, hitTank.y)
+                hitTank != null -> resolveImpact(p, hitTank.x, hitTank.y, directHitTankId = hitTank.id)
                 p.y >= terrainY -> resolveImpact(p, p.x, terrainY.toFloat())
                 p.x < -terrain.width || p.x > 2 * terrain.width -> Unit // fizzle, flew off into the void
                 else -> stillFlying += p
@@ -133,11 +133,25 @@ class GameEngine(
         activeProjectiles += stillFlying
     }
 
-    private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
+    /**
+     * [directHitTankId], when set, identifies the one tank the projectile actually
+     * touched (vs. every other tank merely caught in the blast) - a direct hit with any
+     * damage-dealing weapon destroys that tank outright, regardless of its current
+     * health, while every other tank in range still takes the normal distance-based
+     * splash damage and is only killed if that damage actually brings it to 0.
+     */
+    private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float, directHitTankId: Int? = null) {
         CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
         activeImpactEffects += ImpactEffect(impactX, impactY)
         for (tank in tanks) {
             if (!tank.alive) continue
+            if (tank.id == directHitTankId) {
+                if (projectile.weapon.maxDamage > 0) {
+                    tank.health = 0
+                    tank.alive = false
+                }
+                continue
+            }
             val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)
             if (damage > 0) {
                 tank.health = (tank.health - damage).coerceAtLeast(0)
@@ -177,10 +191,32 @@ class GameEngine(
                 tank.fallVelocity += GRAVITY * dt
                 tank.y = min(tank.y + tank.fallVelocity * dt, surfaceY)
             } else {
+                if (tank.falling) {
+                    applyFallDamage(tank)
+                }
                 tank.falling = false
                 tank.fallVelocity = 0f
                 tank.y = surfaceY
             }
+        }
+    }
+
+    /**
+     * A fall (a blast removing the ground beneath a tank) damages it like any other
+     * ordinary damage source - proportional to how far it dropped, but never an
+     * automatic kill the way a direct hit is: a tank only dies from a fall if the
+     * damage happens to bring its existing health to 0, same as splash damage.
+     */
+    private fun applyFallDamage(tank: Tank) {
+        // v^2 = 2*g*distance (constant acceleration from rest), using the fall's final
+        // velocity right before it's reset below - avoids needing to track a separate
+        // "fall started at" position on Tank.
+        val fallDistance = (tank.fallVelocity * tank.fallVelocity) / (2f * GRAVITY)
+        if (fallDistance <= FALL_DAMAGE_MIN_DISTANCE) return
+        val damage = ((fallDistance - FALL_DAMAGE_MIN_DISTANCE) * FALL_DAMAGE_PER_PIXEL).toInt()
+        if (damage > 0) {
+            tank.health = (tank.health - damage).coerceAtLeast(0)
+            if (tank.health == 0) tank.alive = false
         }
     }
 
@@ -202,8 +238,15 @@ class GameEngine(
     }
 
     companion object {
-        private const val TANK_HIT_RADIUS = 14f
+        private const val TANK_HIT_RADIUS = Tank.RADIUS
         private const val FALL_SETTLE_EPSILON = 0.5f
+
+        // Below this fall distance, damage is 0 (just a minor settle, not a real fall).
+        // 100 fall pixels beyond that deals 32 damage - notable but not close to lethal
+        // for a full-health tank on its own; only a very large fall (or a tank already
+        // hurt) can actually kill, matching "not an automatic kill" like a direct hit is.
+        private const val FALL_DAMAGE_MIN_DISTANCE = 20f
+        private const val FALL_DAMAGE_PER_PIXEL = 0.4f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }
 }

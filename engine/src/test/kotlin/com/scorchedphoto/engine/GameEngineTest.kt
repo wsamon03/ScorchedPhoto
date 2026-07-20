@@ -3,7 +3,9 @@ package com.scorchedphoto.engine
 import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
+import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.testTank
+import com.scorchedphoto.engine.terrain.CraterCarver
 import com.scorchedphoto.terrain.HeightMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -189,19 +191,30 @@ class GameEngineTest {
 
     @Test
     fun `tank falls when a nearby blast removes the ground beneath it`() {
+        // Tank.RADIUS (56) now exceeds every weapon's blast radius (max 55, BIG_BERTHA),
+        // so on flat terrain there's no aim offset that both reaches the bystander's
+        // column *and* keeps the projectile's own flight path outside the direct-hit
+        // radius - any shot close enough to undermine the bystander would itself
+        // register as a direct hit (and instantly destroy it, covered by its own test).
+        // Carve the terrain directly instead, so this test isolates the actual thing it's
+        // about - GameEngine settling a tank onto newly-lower ground - from whether any
+        // particular shot happens to also count as a direct hit.
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val bystander = testTank(id = 2, ownerId = 2, x = 340f, health = 1000)
+        // Far enough apart (450px) that a carve reaching the bystander (radius 30) can't
+        // also reach the shooter's own column and interfere with its "unrelated" shot.
+        val shooter = testTank(id = 1, ownerId = 1, x = 50f)
+        val bystander = testTank(id = 2, ownerId = 2, x = 500f, health = 1000)
         val engine = GameEngine(terrain, listOf(shooter, bystander), maxWindMagnitude = 0f, rng = Random(1))
 
-        shooter.currentWeapon = WeaponType.BIG_BERTHA // large blast radius, easily undermines nearby ground
-        val aimTarget = testTank(id = 99, ownerId = 2, x = bystander.x, y = bystander.y)
-        val idealPower = CpuAimCalculator.solveIdealPower(shooter, aimTarget, terrain, engine.wind)
-        shooter.angleDeg = 45f
-        shooter.power = idealPower
+        // A weak, unrelated shot straight up just to get the engine into
+        // FIRING/RESOLVING phase so tick() actually processes gravity.
+        shooter.angleDeg = 90f
+        shooter.power = 5f
+        engine.fire()
 
         val surfaceBefore = terrain.heightAt(bystander.x.toInt())
-        engine.fire()
+        CraterCarver.carve(terrain, bystander.x.toInt(), surfaceBefore, 30)
+
         runUntilNotResolving(engine)
 
         val surfaceAfter = terrain.heightAt(bystander.x.toInt())
@@ -278,5 +291,93 @@ class GameEngineTest {
             "expected a crater near the shooter's own x=400",
             (370..430).any { x -> terrain.groundY[x] > terrainBefore[x] },
         )
+    }
+
+    @Test
+    fun `a direct hit destroys even a fully healthy tank`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
+        val target = testTank(id = 2, ownerId = 2, x = 500f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = 45f
+        shooter.power = idealPower
+
+        assertEquals(Tank.MAX_HEALTH, target.health)
+        engine.fire()
+        runUntilNotResolving(engine)
+
+        assertFalse("expected a direct hit to destroy a full-health tank outright", target.alive)
+        assertEquals(0, target.health)
+    }
+
+    @Test
+    fun `a near hit deals splash damage but does not automatically destroy the tank`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
+        val target = testTank(id = 2, ownerId = 2, x = 500f)
+        // Just past target, not between shooter and target - the incoming shot hits
+        // target directly (ending its flight) before the trajectory ever comes near the
+        // bystander, so the bystander only takes falloff splash damage from target's
+        // impact point, never registering as a direct hit itself.
+        val bystander = testTank(id = 3, ownerId = 3, x = 520f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(shooter, target, bystander), maxWindMagnitude = 0f, rng = Random(1))
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = 45f
+        shooter.power = idealPower
+
+        assertTrue(engine.fire())
+        runUntilNotResolving(engine)
+
+        assertFalse("expected the directly-hit target to be destroyed", target.alive)
+        assertTrue(
+            "expected the bystander to take some splash damage, health was ${bystander.health}",
+            bystander.health < Tank.MAX_HEALTH,
+        )
+        assertTrue("expected the bystander to survive a near hit at full health", bystander.alive)
+    }
+
+    @Test
+    fun `a large fall damages a tank without automatically killing it`() {
+        val terrain = flatTerrain(width = 1000, groundY = 300)
+        val other = testTank(id = 1, ownerId = 1, x = 900f, health = Tank.MAX_HEALTH)
+        val tank = testTank(id = 2, ownerId = 2, x = 300f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(other, tank), maxWindMagnitude = 0f, rng = Random(1))
+
+        // `other` fires a weak, unrelated shot near its own position (far from `tank`)
+        // just to get the engine into FIRING/RESOLVING so tick() processes gravity. The
+        // ground under `tank` is then dropped directly, for an exact, deterministic fall
+        // distance, decoupled from `other`'s shot and from CraterCarver's own carve shape.
+        other.angleDeg = 90f
+        other.power = 1f
+        engine.fire()
+
+        terrain.groundY[tank.x.toInt()] = 300 + 150 // a large, sudden 150px drop
+
+        val healthBefore = tank.health
+        runUntilNotResolving(engine)
+
+        assertTrue("expected the fall to deal damage", tank.health < healthBefore)
+        assertTrue("expected a single fall to not automatically kill a full-health tank", tank.alive)
+    }
+
+    @Test
+    fun `a small settle causes no fall damage`() {
+        val terrain = flatTerrain(width = 1000, groundY = 300)
+        val other = testTank(id = 1, ownerId = 1, x = 900f, health = Tank.MAX_HEALTH)
+        val tank = testTank(id = 2, ownerId = 2, x = 300f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(other, tank), maxWindMagnitude = 0f, rng = Random(1))
+
+        other.angleDeg = 90f
+        other.power = 1f
+        engine.fire()
+
+        terrain.groundY[tank.x.toInt()] = 300 + 5 // a trivial settle, well under the damage threshold
+
+        runUntilNotResolving(engine)
+
+        assertEquals(Tank.MAX_HEALTH, tank.health)
     }
 }
