@@ -122,21 +122,19 @@ class PhysicsStepTest {
     }
 
     @Test
-    fun `full-power max range is 4x what it was before the range buff`() {
-        // POWER_SCALE was doubled (6 -&gt; 12) to quadruple range, since range is
-        // proportional to speed^2. Recompute the old range from first principles (not by
-        // hardcoding a POWER_SCALE value) so this test documents intent rather than
-        // just re-asserting whatever the constant happens to be.
-        val oldPowerScale = POWER_SCALE / 2f
-        val oldSpeed = 100f * oldPowerScale
+    fun `full-power max range matches the closed-form projectile range formula`() {
+        // Derived directly from POWER_SCALE/GRAVITY rather than hardcoding a historical
+        // range value, so this test stays valid across future range tuning instead of
+        // needing to be rewritten every time POWER_SCALE changes.
+        val speed = 100f * POWER_SCALE
         val angleRad = Math.toRadians(45.0)
-        val oldRange = (oldSpeed * oldSpeed * kotlin.math.sin(2 * angleRad) / GRAVITY).toFloat()
+        val expectedRange = (speed * speed * kotlin.math.sin(2 * angleRad) / GRAVITY).toFloat()
 
-        val newRange = rangeAtFullPower(45f)
+        val actualRange = rangeAtFullPower(45f)
 
         assertTrue(
-            "expected ~4x the old range ($oldRange), was $newRange",
-            abs(newRange - 4f * oldRange) < 4f * oldRange * 0.02f,
+            "expected range ~$expectedRange, was $actualRange",
+            abs(actualRange - expectedRange) < expectedRange * 0.02f,
         )
     }
 

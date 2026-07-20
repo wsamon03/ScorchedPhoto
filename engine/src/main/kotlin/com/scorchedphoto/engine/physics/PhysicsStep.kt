@@ -7,18 +7,21 @@ import kotlin.math.sin
 
 // Tuned for working-image-resolution pixel scale, not real-world units.
 const val GRAVITY = 400f
-const val WIND_SCALE = 8f
+// Wind's contribution to horizontal drift is linear in this constant, so halving it
+// (was 8f) directly halves wind's effect on trajectories.
+const val WIND_SCALE = 4f
 // Range (no wind) is v^2*sin(2*angle)/GRAVITY, i.e. proportional to POWER_SCALE^2 - so
-// doubling this constant, not quadrupling it, gives 4x the range at the same power/angle.
-const val POWER_SCALE = 12f
+// scaling this by sqrt(0.67) (was 12f) gives ~33% less range at the same power/angle.
+const val POWER_SCALE = 9.8f
 
 // A tank's usable power falls off as it takes damage: at 0 health it can still fire, but
 // at only (1 - INJURED_POWER_PENALTY) of a full-health tank's power.
 const val INJURED_POWER_PENALTY = 0.5f
 
 // One full 0 -> 100 -> 0 sweep of the hold-to-charge power meter. A UX timing constant
-// (not physics-derived like POWER_SCALE/GRAVITY) - tune freely by feel.
-const val POWER_CHARGE_PERIOD_SECONDS = 1.6f
+// (not physics-derived like POWER_SCALE/GRAVITY) - tune freely by feel. Doubled (was
+// 1.6f) to move the meter at half speed.
+const val POWER_CHARGE_PERIOD_SECONDS = 3.2f
 
 /**
  * Fixed-timestep Euler integration, shared verbatim by real gameplay and the CPU aim
