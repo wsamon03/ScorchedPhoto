@@ -8,7 +8,7 @@ data class TankConfig(
     val color: Int,
     val isCpu: Boolean,
     val difficulty: Difficulty = Difficulty.MEDIUM,
-    val shape: TankShape = TankShape.SQUARE,
+    val shape: TankShape = TankShape.CLASSIC,
 )
 
 data class MatchConfig(val tankConfigs: List<TankConfig>)

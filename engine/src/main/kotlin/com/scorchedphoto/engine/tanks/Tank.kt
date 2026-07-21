@@ -19,7 +19,7 @@ data class Tank(
     var falling: Boolean = false,
     var fallVelocity: Float = 0f,
     val difficulty: Difficulty = Difficulty.MEDIUM,
-    val shape: TankShape = TankShape.SQUARE,
+    val shape: TankShape = TankShape.CLASSIC,
 ) {
     companion object {
         const val MAX_HEALTH = 100
