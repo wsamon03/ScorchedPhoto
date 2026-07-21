@@ -10,6 +10,7 @@ import android.graphics.RectF
 import com.scorchedphoto.engine.ImpactEffect
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.tanks.Tank
+import com.scorchedphoto.engine.tanks.TankShape
 import com.scorchedphoto.terrain.HeightMap
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -143,7 +144,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         tankBodyPaint.color = tank.color
         canvas.save()
         canvas.rotate(slopeDeg, cx, cy)
-        canvas.drawRect(cx - halfWidth, cy - halfWidth, cx + halfWidth, cy, tankBodyPaint)
+        canvas.drawPath(tankBodyPath(tank.shape, cx, cy, halfWidth), tankBodyPaint)
         canvas.restore()
 
         // Barrel angle is an absolute aim reference, so it's drawn unrotated by slope.
@@ -168,6 +169,18 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
             barTop + healthBarHeight,
             healthBarFillPaint,
         )
+    }
+
+    /** Builds [shape]'s normalized outline (see [TankShape]) into a screen-space [Path]. */
+    private fun tankBodyPath(shape: TankShape, cx: Float, cy: Float, halfWidth: Float): Path {
+        val path = Path()
+        shape.outline.forEachIndexed { index, (nx, ny) ->
+            val x = cx + nx * halfWidth
+            val y = cy + ny * halfWidth
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        return path
     }
 
     companion object {

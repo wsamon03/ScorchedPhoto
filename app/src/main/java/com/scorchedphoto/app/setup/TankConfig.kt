@@ -1,12 +1,14 @@
 package com.scorchedphoto.app.setup
 
 import com.scorchedphoto.engine.ai.Difficulty
+import com.scorchedphoto.engine.tanks.TankShape
 
 data class TankConfig(
     val name: String,
     val color: Int,
     val isCpu: Boolean,
     val difficulty: Difficulty = Difficulty.MEDIUM,
+    val shape: TankShape = TankShape.SQUARE,
 )
 
 data class MatchConfig(val tankConfigs: List<TankConfig>)

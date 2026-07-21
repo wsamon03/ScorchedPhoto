@@ -2,6 +2,7 @@ package com.scorchedphoto.app.setup
 
 import androidx.lifecycle.ViewModel
 import com.scorchedphoto.engine.ai.Difficulty
+import com.scorchedphoto.engine.tanks.TankShape
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +42,10 @@ class GameSetupViewModel @Inject constructor(
         updateAt(index) { it.copy(difficulty = difficulty) }
     }
 
+    fun setShape(index: Int, shape: TankShape) {
+        updateAt(index) { it.copy(shape = shape) }
+    }
+
     fun commitAndStart() {
         matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value)
     }
@@ -56,6 +61,7 @@ class GameSetupViewModel @Inject constructor(
             name = "Tank ${i + 1}",
             color = TANK_COLOR_PALETTE[i % TANK_COLOR_PALETTE.size],
             isCpu = i != 0, // first tank defaults to human, rest to CPU
+            shape = TankShape.entries[i % TankShape.entries.size],
         )
     }
 }

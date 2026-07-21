@@ -61,6 +61,7 @@ class GameViewModel @Inject constructor(
                 y = 0f,
                 currentWeapon = WeaponType.STANDARD_SHELL,
                 difficulty = config.difficulty,
+                shape = config.shape,
             )
         }
 
