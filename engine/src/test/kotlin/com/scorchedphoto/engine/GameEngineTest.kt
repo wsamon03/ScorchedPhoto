@@ -150,10 +150,16 @@ class GameEngineTest {
 
         val ammoLimit = WeaponCatalog.BIG_BERTHA.ammoLimit!!
         a.currentWeapon = WeaponType.BIG_BERTHA
-        a.angleDeg = 90f
-        a.power = 1f
-        b.angleDeg = 90f
-        b.power = 1f
+        // A steep, weak shot arcs right back down onto the shooter's own position, which
+        // is now a guaranteed self-bullseye (instant kill) - use a shallower/stronger arc
+        // that clears its own footprint, matching the pattern other tests already use.
+        // a fires rightward (toward the middle of the map, away from itself at x=300);
+        // b fires leftward (also toward the middle, away from both itself at x=900 and
+        // the terrain's right edge) so neither shot risks self-splash or edge clamping.
+        a.angleDeg = 45f
+        a.power = 30f
+        b.angleDeg = 135f
+        b.power = 30f
 
         repeat(ammoLimit) {
             assertEquals(a.id, engine.currentTank?.id)
@@ -180,8 +186,12 @@ class GameEngineTest {
         val winds = mutableSetOf(engine.wind.velocity)
         repeat(5) {
             val current = engine.currentTank!!
-            current.angleDeg = 80f
-            current.power = 10f
+            // A shallow, strong-enough shot (range ~216px) that clears the shooter's own
+            // bullseye zone without reaching the other tank 400px away, whichever tank is
+            // currently up - avoids a self-bullseye ending the match early (see the
+            // ammoLimit test above for the same fix).
+            current.angleDeg = 45f
+            current.power = 30f
             engine.fire()
             runUntilNotResolving(engine)
             winds += engine.wind.velocity
@@ -294,7 +304,7 @@ class GameEngineTest {
     }
 
     @Test
-    fun `a direct hit destroys even a fully healthy tank`() {
+    fun `a well-aimed shot reliably deals at least full damage to a fully healthy tank`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val shooter = testTank(id = 1, ownerId = 1, x = 300f)
         val target = testTank(id = 2, ownerId = 2, x = 500f, health = Tank.MAX_HEALTH)
@@ -308,8 +318,17 @@ class GameEngineTest {
         engine.fire()
         runUntilNotResolving(engine)
 
-        assertFalse("expected a direct hit to destroy a full-health tank outright", target.alive)
-        assertEquals(0, target.health)
+        // A shot aimed at the target's exact x always registers as touching the target
+        // (distance to its center under Tank.RADIUS, see DamageCalculator) before it can
+        // fly past - that's guaranteed at least full weapon damage, and sometimes an
+        // outright bullseye kill depending on exactly where the discrete flight path
+        // first crosses into range, but never anything less than full damage.
+        val maxDamage = WeaponCatalog.STANDARD_SHELL.maxDamage
+        assertTrue(
+            "expected at least full weapon damage ($maxDamage) or a kill, " +
+                "target health was ${target.health}, alive=${target.alive}",
+            !target.alive || target.health <= Tank.MAX_HEALTH - maxDamage,
+        )
     }
 
     @Test
@@ -331,7 +350,12 @@ class GameEngineTest {
         assertTrue(engine.fire())
         runUntilNotResolving(engine)
 
-        assertFalse("expected the directly-hit target to be destroyed", target.alive)
+        val maxDamage = WeaponCatalog.STANDARD_SHELL.maxDamage
+        assertTrue(
+            "expected the directly-hit target to take at least full weapon damage ($maxDamage) or be killed, " +
+                "target health was ${target.health}, alive=${target.alive}",
+            !target.alive || target.health <= Tank.MAX_HEALTH - maxDamage,
+        )
         assertTrue(
             "expected the bystander to take some splash damage, health was ${bystander.health}",
             bystander.health < Tank.MAX_HEALTH,

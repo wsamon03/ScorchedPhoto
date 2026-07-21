@@ -112,14 +112,21 @@ class GameEngine(
 
             val column = p.x.toInt().coerceIn(0, terrain.width - 1)
             val terrainY = terrain.heightAt(column)
-            val hitTank = tanks.firstOrNull { tank ->
+            val touchedTank = tanks.any { tank ->
                 tank.alive && tank.id != p.ownerTankId &&
-                    hypot((tank.x - p.x).toDouble(), (tank.y - p.y).toDouble()) < TANK_HIT_RADIUS
+                    hypot((tank.x - p.x).toDouble(), (tank.y - p.y).toDouble()) < Tank.RADIUS
             }
 
             when {
-                hitTank != null -> resolveImpact(p, hitTank.x, hitTank.y, directHitTankId = hitTank.id)
-                p.y >= terrainY -> resolveImpact(p, p.x, terrainY.toFloat())
+                // Impact point is always anchored to the ground surface at the
+                // projectile's own x, whether it stopped by touching a tank's body (which
+                // can happen while the projectile is still somewhat elevated - tanks are
+                // sizable now) or by reaching the ground directly - an explosion doesn't
+                // float in mid-air, and this keeps DamageCalculator's per-tank distance
+                // primarily a function of horizontal aim precision, matching how a real
+                // shot's accuracy is judged. Each affected tank's own distance to this
+                // point (not snapped to any specific tank's center) drives its damage.
+                touchedTank || p.y >= terrainY -> resolveImpact(p, p.x, terrainY.toFloat())
                 p.x < -terrain.width || p.x > 2 * terrain.width -> Unit // fizzle, flew off into the void
                 else -> stillFlying += p
             }
@@ -134,28 +141,29 @@ class GameEngine(
     }
 
     /**
-     * [directHitTankId], when set, identifies the one tank the projectile actually
-     * touched (vs. every other tank merely caught in the blast) - a direct hit with any
-     * damage-dealing weapon destroys that tank outright, regardless of its current
-     * health, while every other tank in range still takes the normal distance-based
-     * splash damage and is only killed if that damage actually brings it to 0.
+     * Every alive tank within reach takes damage from [DamageCalculator], keyed purely
+     * on its own distance from ([impactX], [impactY]) - a "bullseye" (the tank's central
+     * 20%, see [DamageCalculator]) returns `null` and destroys that tank outright
+     * regardless of current health; everything else is an ordinary amount that only
+     * kills if it actually brings health to 0.
      */
-    private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float, directHitTankId: Int? = null) {
+    private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
         CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
         activeImpactEffects += ImpactEffect(impactX, impactY)
         for (tank in tanks) {
             if (!tank.alive) continue
-            if (tank.id == directHitTankId) {
-                if (projectile.weapon.maxDamage > 0) {
-                    tank.health = 0
-                    tank.alive = false
-                }
-                continue
-            }
             val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)
-            if (damage > 0) {
-                tank.health = (tank.health - damage).coerceAtLeast(0)
-                if (tank.health == 0) tank.alive = false
+            when {
+                damage == null -> {
+                    if (projectile.weapon.maxDamage > 0) {
+                        tank.health = 0
+                        tank.alive = false
+                    }
+                }
+                damage > 0 -> {
+                    tank.health = (tank.health - damage).coerceAtLeast(0)
+                    if (tank.health == 0) tank.alive = false
+                }
             }
         }
     }
@@ -238,7 +246,6 @@ class GameEngine(
     }
 
     companion object {
-        private const val TANK_HIT_RADIUS = Tank.RADIUS
         private const val FALL_SETTLE_EPSILON = 0.5f
 
         // Below this fall distance, damage is 0 (just a minor settle, not a real fall).

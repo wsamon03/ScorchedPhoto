@@ -12,7 +12,6 @@ data class Weapon(
     val displayName: String,
     val blastRadius: Float,
     val maxDamage: Int,
-    val minDamageIfInRadius: Int = 5,
     val ammoLimit: Int? = null,
     val childCount: Int = 1,
     val childSpreadDegrees: Float = 0f,
