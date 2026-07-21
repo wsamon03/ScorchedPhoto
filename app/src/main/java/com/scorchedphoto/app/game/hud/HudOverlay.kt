@@ -44,7 +44,7 @@ private data class FiredShotReadout(
 fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier: Modifier = Modifier) {
     var canvasSizePx by remember { mutableStateOf(IntSize.Zero) }
     val powerChargeState = rememberPowerChargeState()
-    PowerChargeAnimator(powerChargeState)
+    PowerChargeAnimator(powerChargeState, maxPower = uiState.currentMaxPower)
 
     var lastFired by remember { mutableStateOf<FiredShotReadout?>(null) }
     LaunchedEffect(lastFired) {
@@ -147,6 +147,7 @@ fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier:
             )
             PowerMeterBar(
                 state = powerChargeState,
+                maxPower = uiState.currentMaxPower,
                 modifier = Modifier.offset { IntOffset(meterX.roundToInt(), meterY.roundToInt()) },
             )
         }
@@ -154,6 +155,7 @@ fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier:
         if (canFire) {
             PowerChargeButton(
                 state = powerChargeState,
+                maxPower = uiState.currentMaxPower,
                 onCommand = onFireCommand,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)

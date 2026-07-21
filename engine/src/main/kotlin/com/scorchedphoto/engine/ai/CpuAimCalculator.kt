@@ -3,8 +3,8 @@ package com.scorchedphoto.engine.ai
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
-import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
+import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.terrain.HeightMap
@@ -46,11 +46,16 @@ object CpuAimCalculator {
         val (minAngle, maxAngle) = if (target.x >= shooter.x) 5f to 85f else 95f to 175f
         return AimResult(
             angleDeg = (baseAngle + angleNoise).coerceIn(minAngle, maxAngle),
-            power = (idealPower * (1f + powerNoise)).coerceIn(1f, 100f),
+            power = (idealPower * (1f + powerNoise)).coerceIn(1f, maxPowerForHealth(shooter.health, Tank.MAX_HEALTH)),
         )
     }
 
-    /** The noise-free power, at a fixed [AIM_ELEVATION_DEG] mirrored toward the target, that lands on the target's x. */
+    /**
+     * The noise-free power, at a fixed [AIM_ELEVATION_DEG] mirrored toward the target, that
+     * lands on the target's x - bounded by [shooter]'s actual power ceiling (see
+     * [maxPowerForHealth]) so an injured CPU tank never "solves" for a shot stronger than
+     * it can really fire.
+     */
     fun solveIdealPower(
         shooter: Tank,
         target: Tank,
@@ -62,8 +67,8 @@ object CpuAimCalculator {
         val desiredRange = abs(target.x - shooter.x)
 
         var lowPower = 1f
-        var highPower = 100f
-        var bestPower = 50f
+        var highPower = maxPowerForHealth(shooter.health, Tank.MAX_HEALTH)
+        var bestPower = highPower / 2f
 
         repeat(BINARY_SEARCH_ITERATIONS) {
             val midPower = (lowPower + highPower) / 2f
@@ -86,8 +91,7 @@ object CpuAimCalculator {
         power: Float,
         wind: Wind,
     ): Float? {
-        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
-        val (vx, vy) = launchVelocity(angleDeg, power, healthMultiplier)
+        val (vx, vy) = launchVelocity(angleDeg, power)
         val projectile = Projectile(shooter.x, shooter.y, vx, vy, WeaponCatalog.STANDARD_SHELL, shooter.id)
         var elapsed = 0f
         while (elapsed < MAX_SIMULATION_SECONDS) {

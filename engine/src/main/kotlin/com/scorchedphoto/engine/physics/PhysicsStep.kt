@@ -40,15 +40,16 @@ fun stepProjectile(projectile: Projectile, wind: Wind, dt: Float) {
 
 /**
  * angleDeg: full circle, standard math convention - 0 = right, 90 = up, 180 = left,
- * 270 = down, counterclockwise. power: 0..100. healthMultiplier: 0..1, from
- * [healthPowerMultiplier] - defaults to 1 (full power) for callers that don't model
- * tank health, e.g. existing tests. No angle is treated as invalid (e.g. firing
- * downward into the ground right next to the tank is a legal, if usually bad, shot -
- * the existing crater/splash-damage system already handles that case).
+ * 270 = down, counterclockwise. power: 0..100 - callers are responsible for capping this
+ * to whatever the shooter can actually reach (see [maxPowerForHealth]) before calling;
+ * this function just turns whatever power it's given into a speed, no further discount
+ * applied. No angle is treated as invalid (e.g. firing downward into the ground right
+ * next to the tank is a legal, if usually bad, shot - the existing crater/splash-damage
+ * system already handles that case).
  */
-fun launchVelocity(angleDeg: Float, power: Float, healthMultiplier: Float = 1f): Pair<Float, Float> {
+fun launchVelocity(angleDeg: Float, power: Float): Pair<Float, Float> {
     val angleRad = Math.toRadians(angleDeg.toDouble())
-    val speed = power.coerceIn(0f, 100f) * POWER_SCALE * healthMultiplier.coerceIn(0f, 1f)
+    val speed = power.coerceIn(0f, 100f) * POWER_SCALE
     val vx = (cos(angleRad) * speed).toFloat()
     val vy = -(sin(angleRad) * speed).toFloat()
     return vx to vy
@@ -74,12 +75,15 @@ fun screenOffsetToAngleDeg(dx: Float, dy: Float): Float {
 
 /**
  * The hold-to-charge power meter's value at a given elapsed hold time: a smooth
- * 0->100->0 oscillation, exactly 0 at t=0, exactly 100 at the half-period, wrapping
- * cleanly for indefinite holds.
+ * 0->maxPower->0 oscillation, exactly 0 at t=0, exactly [maxPower] at the half-period,
+ * wrapping cleanly for indefinite holds. [maxPower] caps how high the meter can climb (see
+ * [maxPowerForHealth]) - an injured tank's bar rises only to that reduced ceiling and back
+ * down again, so the player sees their actual firing limit rather than having whatever
+ * they release silently discounted afterward.
  */
-fun oscillatingPower(elapsedSeconds: Float, periodSeconds: Float = POWER_CHARGE_PERIOD_SECONDS): Float {
+fun oscillatingPower(elapsedSeconds: Float, periodSeconds: Float = POWER_CHARGE_PERIOD_SECONDS, maxPower: Float = 100f): Float {
     val phase = (elapsedSeconds % periodSeconds) / periodSeconds
-    return (50f * (1f - cos(2f * PI.toFloat() * phase))).coerceIn(0f, 100f)
+    return (maxPower / 2f * (1f - cos(2f * PI.toFloat() * phase))).coerceIn(0f, maxPower)
 }
 
 /**
@@ -92,3 +96,12 @@ fun healthPowerMultiplier(health: Int, maxHealth: Int): Float {
     val healthFraction = (health.toFloat() / maxHealth).coerceIn(0f, 1f)
     return 1f - INJURED_POWER_PENALTY * (1f - healthFraction)
 }
+
+/**
+ * The actual power ceiling (0..100, same scale as [Tank.power]/the charge meter) a tank
+ * at [health] can reach - [healthPowerMultiplier] expressed directly as a power cap rather
+ * than a post-hoc speed discount, so it can be enforced at the source: the charge meter
+ * stops rising here (see [oscillatingPower]), and [com.scorchedphoto.engine.GameEngine.fire]
+ * clamps to it rather than scaling down whatever power was requested.
+ */
+fun maxPowerForHealth(health: Int, maxHealth: Int): Float = 100f * healthPowerMultiplier(health, maxHealth)

@@ -160,11 +160,18 @@ class PhysicsStepTest {
     }
 
     @Test
-    fun `launchVelocity scales speed by healthMultiplier`() {
-        val full = launchVelocity(angleDeg = 30f, power = 80f, healthMultiplier = 1f)
-        val half = launchVelocity(angleDeg = 30f, power = 80f, healthMultiplier = 0.75f)
-        assertEquals(full.first * 0.75f, half.first, 0.01f)
-        assertEquals(full.second * 0.75f, half.second, 0.01f)
+    fun `maxPowerForHealth is 100 at full health`() {
+        assertEquals(100f, maxPowerForHealth(health = 100, maxHealth = 100), 0.01f)
+    }
+
+    @Test
+    fun `maxPowerForHealth is 75 at half health`() {
+        assertEquals(75f, maxPowerForHealth(health = 50, maxHealth = 100), 0.01f)
+    }
+
+    @Test
+    fun `maxPowerForHealth floors at 50 when health reaches zero`() {
+        assertEquals(50f, maxPowerForHealth(health = 0, maxHealth = 100), 0.01f)
     }
 
     @Test
@@ -205,6 +212,20 @@ class PhysicsStepTest {
         assertEquals(50f, oscillatingPower(period / 4f, period), 0.5f)
         // Held well past one period: the oscillation keeps going, not stuck at an edge.
         assertEquals(100f, oscillatingPower(period * 2.5f, period), 0.5f)
+    }
+
+    @Test
+    fun `oscillatingPower caps its peak at maxPower instead of always reaching 100`() {
+        val period = 2f
+        assertEquals(0f, oscillatingPower(0f, period, maxPower = 75f), 0.01f)
+        assertEquals(75f, oscillatingPower(period / 2f, period, maxPower = 75f), 0.5f)
+        assertEquals(0f, oscillatingPower(period, period, maxPower = 75f), 0.5f)
+        // Never overshoots the cap on the way up or back down.
+        var t = 0f
+        while (t < period * 3f) {
+            assertTrue(oscillatingPower(t, period, maxPower = 75f) <= 75.01f)
+            t += 0.01f
+        }
     }
 
     @Test

@@ -25,6 +25,8 @@ data class GameUiState(
     val currentTankIsCpu: Boolean = false,
     val currentAngleDeg: Float = 45f,
     val currentPower: Float = 50f,
+    /** The current tank's actual power ceiling (see [com.scorchedphoto.engine.physics.maxPowerForHealth]) - less than 100 once it's taken damage. */
+    val currentMaxPower: Float = 100f,
     /** Current tank's world position, for the [com.scorchedphoto.app.game.hud.AngleRing] overlay. */
     val currentTankX: Float = 0f,
     val currentTankY: Float = 0f,

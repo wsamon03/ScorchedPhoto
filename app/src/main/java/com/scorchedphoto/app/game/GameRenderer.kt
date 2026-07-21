@@ -190,15 +190,16 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
 
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of
-        // these scale proportionally with it (4x the old 14f-radius tuning: barrel 26->104,
-        // health bar 32x5->128x20, gap 14->56, slope sample offset 12->48). All are world-
-        // space units, scaled by WorldTransform.scale like every other size in this file.
+        // these scale proportionally with it (4x the old 14f-radius tuning, then halved
+        // back down: barrel 26->104->52, health bar 32x5->128x20->64x10, gap 14->56->28,
+        // slope sample offset 12->48->24). All are world-space units, scaled by
+        // WorldTransform.scale like every other size in this file.
         private const val TANK_HALF_WIDTH = Tank.RADIUS
-        private const val BARREL_LENGTH = 104f
-        private const val HEALTH_BAR_WIDTH = 128f
-        private const val HEALTH_BAR_HEIGHT = 20f
-        private const val HEALTH_BAR_GAP = 56f
-        private const val SLOPE_SAMPLE_OFFSET = 48
+        private const val BARREL_LENGTH = 52f
+        private const val HEALTH_BAR_WIDTH = 64f
+        private const val HEALTH_BAR_HEIGHT = 10f
+        private const val HEALTH_BAR_GAP = 28f
+        private const val SLOPE_SAMPLE_OFFSET = 24
 
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }

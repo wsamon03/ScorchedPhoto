@@ -3,6 +3,7 @@ package com.scorchedphoto.engine
 import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
+import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.testTank
 import com.scorchedphoto.engine.terrain.CraterCarver
@@ -201,14 +202,10 @@ class GameEngineTest {
 
     @Test
     fun `tank falls when a nearby blast removes the ground beneath it`() {
-        // Tank.RADIUS (56) now exceeds every weapon's blast radius (max 55, BIG_BERTHA),
-        // so on flat terrain there's no aim offset that both reaches the bystander's
-        // column *and* keeps the projectile's own flight path outside the direct-hit
-        // radius - any shot close enough to undermine the bystander would itself
-        // register as a direct hit (and instantly destroy it, covered by its own test).
-        // Carve the terrain directly instead, so this test isolates the actual thing it's
-        // about - GameEngine settling a tank onto newly-lower ground - from whether any
-        // particular shot happens to also count as a direct hit.
+        // Carve the terrain directly rather than firing a shot that happens to undermine
+        // the bystander, so this test isolates the actual thing it's about - GameEngine
+        // settling a tank onto newly-lower ground - from whether any particular shot also
+        // happens to damage or touch the bystander.
         val terrain = flatTerrain(width = 1000, groundY = 500)
         // Far enough apart (450px) that a carve reaching the bystander (radius 30) can't
         // also reach the shooter's own column and interfere with its "unrelated" shot.
@@ -234,7 +231,7 @@ class GameEngineTest {
     }
 
     @Test
-    fun `an injured tank fires at reduced power`() {
+    fun `an injured tank's shot is capped at its reduced max power, not scaled down from what was requested`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val healthyShooter = testTank(id = 1, ownerId = 1, x = 300f, health = 100)
         val healthyTarget = testTank(id = 2, ownerId = 2, x = 700f)
@@ -249,11 +246,20 @@ class GameEngineTest {
 
         val injuredEngine = GameEngine(terrain, listOf(halfHealthShooter, halfHealthTarget), maxWindMagnitude = 0f, rng = Random(1))
         halfHealthShooter.angleDeg = 45f
-        halfHealthShooter.power = 80f
+        halfHealthShooter.power = 80f // requests more than its capped max (75)
         injuredEngine.fire()
         val injuredSpeed = injuredEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
 
-        assertEquals(healthySpeed * 0.75, injuredSpeed, healthySpeed * 0.01)
+        // A full-health tank's request (80, under its 100 cap) passes through unchanged.
+        val (expectedHealthyVx, expectedHealthyVy) = launchVelocity(45f, 80f)
+        val expectedHealthySpeed = hypot(expectedHealthyVx.toDouble(), expectedHealthyVy.toDouble())
+        assertEquals(expectedHealthySpeed, healthySpeed, expectedHealthySpeed * 0.01)
+
+        // Half health caps max power at 75 (100 * (1 - 0.5*0.5)); the request of 80 clamps
+        // down to that fixed ceiling rather than being scaled by a hidden multiplier.
+        val (expectedInjuredVx, expectedInjuredVy) = launchVelocity(45f, 75f)
+        val expectedInjuredSpeed = hypot(expectedInjuredVx.toDouble(), expectedInjuredVy.toDouble())
+        assertEquals(expectedInjuredSpeed, injuredSpeed, expectedInjuredSpeed * 0.01)
     }
 
     @Test

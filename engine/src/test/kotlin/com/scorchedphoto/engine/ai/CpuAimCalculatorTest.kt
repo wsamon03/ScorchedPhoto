@@ -3,7 +3,6 @@ package com.scorchedphoto.engine.ai
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
-import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
@@ -24,9 +23,8 @@ class CpuAimCalculatorTest {
         angleDeg: Float,
         power: Float,
         wind: Wind,
-        healthMultiplier: Float = 1f,
     ): Float {
-        val (vx, vy) = launchVelocity(angleDeg, power, healthMultiplier)
+        val (vx, vy) = launchVelocity(angleDeg, power)
         val p = Projectile(shooter.x, shooter.y, vx, vy, WeaponCatalog.STANDARD_SHELL, shooter.id)
         var t = 0f
         while (t < 10f) {
@@ -106,12 +104,13 @@ class CpuAimCalculatorTest {
         val target = testTank(id = 2, x = 750f, y = 500f)
         val wind = Wind(0f)
 
+        // The solve is already bounded by the shooter's actual power ceiling (see
+        // maxPowerForHealth), so replaying its result needs no extra discount applied.
         val power = CpuAimCalculator.solveIdealPower(shooter, target, terrain, wind)
-        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
-        val landingX = replay(shooter, terrain, 45f, power, wind = wind, healthMultiplier = healthMultiplier)
+        val landingX = replay(shooter, terrain, 45f, power, wind = wind)
 
         assertTrue(
-            "expected landing near ${target.x}, got $landingX (power=$power, healthMultiplier=$healthMultiplier)",
+            "expected landing near ${target.x}, got $landingX (power=$power)",
             abs(landingX - target.x) < 15f,
         )
     }

@@ -9,8 +9,8 @@ import org.junit.Test
 
 class DamageCalculatorTest {
 
-    // blastRadius=28, maxDamage=35. Tank.RADIUS=56, so bullseyeRadius=56*0.2=11.2 and
-    // maxReach=56+28=84.
+    // blastRadius=28, maxDamage=35. Tank.RADIUS=28, so bullseyeRadius=28*0.2=5.6 and
+    // maxReach=28+28=56.
     private val weapon = WeaponCatalog.STANDARD_SHELL
 
     private fun tankAtDistance(distance: Float) = testTank(id = 1, x = 100f + distance, y = 100f)
@@ -40,7 +40,7 @@ class DamageCalculatorTest {
 
     @Test
     fun `anywhere else on the tank's body deals full damage`() {
-        val tank = tankAtDistance(30f) // between the bullseye zone and Tank.RADIUS (56)
+        val tank = tankAtDistance(Tank.RADIUS * 0.6f) // between the bullseye zone and Tank.RADIUS
         val damage = DamageCalculator.computeDamage(weapon, impactX = 100f, impactY = 100f, tank = tank)
         assertEquals(weapon.maxDamage, damage)
     }

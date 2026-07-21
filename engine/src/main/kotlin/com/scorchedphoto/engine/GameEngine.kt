@@ -6,8 +6,8 @@ import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
-import com.scorchedphoto.engine.physics.healthPowerMultiplier
 import com.scorchedphoto.engine.physics.launchVelocity
+import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.terrain.CraterCarver
@@ -74,8 +74,12 @@ class GameEngine(
             if (remaining <= 0) return false
             ammoRemaining[shooter.id]?.set(weapon.type, remaining - 1)
         }
-        val healthMultiplier = healthPowerMultiplier(shooter.health, Tank.MAX_HEALTH)
-        val (vx, vy) = launchVelocity(shooter.angleDeg, shooter.power, healthMultiplier)
+        // Capped at the source rather than scaled afterward: an injured shooter's power
+        // meter already stops rising at this same ceiling (see maxPowerForHealth), so this
+        // clamp is a defensive backstop (e.g. against a CPU aim solve or a caller that
+        // ignores the meter) rather than the primary way the cap gets enforced.
+        val cappedPower = shooter.power.coerceAtMost(maxPowerForHealth(shooter.health, Tank.MAX_HEALTH))
+        val (vx, vy) = launchVelocity(shooter.angleDeg, cappedPower)
         activeProjectiles += Projectile(shooter.x, shooter.y, vx, vy, weapon, shooter.id)
         phase = MatchPhase.FIRING
         return true

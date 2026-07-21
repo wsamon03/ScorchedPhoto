@@ -9,6 +9,7 @@ import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
+import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.TankPlacement
 import com.scorchedphoto.terrain.HeightMap
@@ -89,6 +90,7 @@ class GameViewModel @Inject constructor(
             currentTankIsCpu = current?.isCpu ?: false,
             currentAngleDeg = current?.angleDeg ?: 45f,
             currentPower = current?.power ?: 50f,
+            currentMaxPower = current?.let { maxPowerForHealth(it.health, Tank.MAX_HEALTH) } ?: 100f,
             currentTankX = current?.x ?: 0f,
             currentTankY = current?.y ?: 0f,
             terrainWidth = engine.terrain.width,
