@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.scorchedphoto.app.game.GameCommand
 import com.scorchedphoto.app.game.GameUiState
+import com.scorchedphoto.app.game.WorldTransform
 import com.scorchedphoto.engine.MatchPhase
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
@@ -56,10 +57,18 @@ fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier:
     val density = LocalDensity.current
     val hasValidCanvas = canvasSizePx.width > 0 && canvasSizePx.height > 0
 
-    val scaleX = if (hasValidCanvas) canvasSizePx.width.toFloat() / uiState.terrainWidth else 0f
-    val scaleY = if (hasValidCanvas) canvasSizePx.height.toFloat() / uiState.terrainHeight else 0f
-    val tankScreenX = uiState.currentTankX * scaleX
-    val tankScreenY = uiState.currentTankY * scaleY
+    // The same uniform, letterboxed fit GameRenderer draws the world with - see
+    // WorldTransform's doc for why independent x/y scale factors aren't used: this HUD
+    // layer has to agree exactly with the renderer below it, or touch targets (the angle
+    // ring, the power meter) drift away from where the tank is actually drawn.
+    val transform = WorldTransform.fit(
+        canvasSizePx.width.toFloat(),
+        canvasSizePx.height.toFloat(),
+        uiState.terrainWidth.toFloat(),
+        uiState.terrainHeight.toFloat(),
+    )
+    val tankScreenX = if (hasValidCanvas) transform.screenX(uiState.currentTankX) else 0f
+    val tankScreenY = if (hasValidCanvas) transform.screenY(uiState.currentTankY) else 0f
 
     val touchRadiusPx = with(density) { TOUCH_RADIUS.toPx() }
     val gapPx = with(density) { POWER_METER_HORIZONTAL_GAP.toPx() }

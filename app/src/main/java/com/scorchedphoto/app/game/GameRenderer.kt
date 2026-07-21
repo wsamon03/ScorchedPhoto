@@ -19,7 +19,9 @@ import kotlin.math.sin
  * Draws one frame onto the [GameSurfaceView]'s [Canvas]: the photo as a backdrop, a dark
  * scar over any column craters have carved lower than the original terrain, projectiles,
  * fading impact flashes, and tanks (body tilted to the local slope, a barrel indicating
- * aim, and a small health bar).
+ * aim, and a small health bar). Every world-space position and size is mapped through a
+ * single [WorldTransform.fit] (see its doc for why: independent x/y scale factors distort
+ * launch angles and motion).
  */
 class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntArray) {
 
@@ -27,13 +29,11 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     private val craterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.argb(230, 40, 30, 20)
         style = Paint.Style.STROKE
-        strokeWidth = CRATER_STROKE_WIDTH
         strokeCap = Paint.Cap.ROUND
     }
     private val tankBodyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val barrelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.DKGRAY
-        strokeWidth = 5f
         style = Paint.Style.STROKE
     }
     private val projectilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
@@ -51,28 +51,42 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         impactEffects: List<ImpactEffect>,
     ) {
         canvas.drawColor(Color.BLACK)
-        val scaleX = canvas.width.toFloat() / terrain.width
-        val scaleY = canvas.height.toFloat() / terrain.height
+        val transform = WorldTransform.fit(
+            canvas.width.toFloat(),
+            canvas.height.toFloat(),
+            terrain.width.toFloat(),
+            terrain.height.toFloat(),
+        )
 
         if (photo != null && srcRect != null) {
-            val dst = RectF(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat())
+            val dst = RectF(
+                transform.screenX(0f),
+                transform.screenY(0f),
+                transform.screenX(terrain.width.toFloat()),
+                transform.screenY(terrain.height.toFloat()),
+            )
             canvas.drawBitmap(photo, srcRect, dst, backgroundPaint)
         }
 
-        drawCraterScars(canvas, terrain, scaleX, scaleY)
-        drawImpactEffects(canvas, impactEffects, scaleX, scaleY)
+        drawCraterScars(canvas, terrain, transform)
+        drawImpactEffects(canvas, impactEffects, transform)
 
         for (projectile in projectiles) {
-            canvas.drawCircle(projectile.x * scaleX, projectile.y * scaleY, PROJECTILE_RADIUS, projectilePaint)
+            canvas.drawCircle(
+                transform.screenX(projectile.x),
+                transform.screenY(projectile.y),
+                PROJECTILE_RADIUS * transform.scale,
+                projectilePaint,
+            )
         }
 
         for (tank in tanks) {
             if (!tank.alive) continue
-            drawTank(canvas, tank, terrain, scaleX, scaleY)
+            drawTank(canvas, tank, terrain, transform)
         }
     }
 
-    private fun drawCraterScars(canvas: Canvas, terrain: HeightMap, scaleX: Float, scaleY: Float) {
+    private fun drawCraterScars(canvas: Canvas, terrain: HeightMap, transform: WorldTransform) {
         val path = Path()
         var started = false
         for (x in 0 until terrain.width) {
@@ -82,65 +96,76 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
                 started = false
                 continue
             }
-            val px = x * scaleX
+            val px = transform.screenX(x.toFloat())
+            val py = transform.screenY(current.toFloat())
             if (!started) {
-                path.moveTo(px, current * scaleY)
+                path.moveTo(px, py)
                 started = true
             } else {
-                path.lineTo(px, current * scaleY)
+                path.lineTo(px, py)
             }
         }
+        craterPaint.strokeWidth = CRATER_STROKE_WIDTH * transform.scale
         canvas.drawPath(path, craterPaint)
     }
 
-    private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, scaleX: Float, scaleY: Float) {
+    private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, transform: WorldTransform) {
         for (impact in impactEffects) {
             val fadeFraction = (1f - impact.age / IMPACT_EFFECT_LIFETIME_SECONDS).coerceIn(0f, 1f)
             if (fadeFraction <= 0f) continue
             impactPaint.alpha = (fadeFraction * 255).toInt()
             // Sized to the weapon's actual blast radius (the same radius CraterCarver and
-            // DamageCalculator use, kept unscaled like TANK_HALF_WIDTH below) so the flash
+            // DamageCalculator use, in world space like everything else here) so the flash
             // visually matches the area that's actually affected, shrinking slightly as it
             // fades rather than starting from a fixed size.
-            val radius = impact.blastRadius * (1f - fadeFraction * 0.5f)
-            canvas.drawCircle(impact.x * scaleX, impact.y * scaleY, radius, impactPaint)
+            val radius = impact.blastRadius * transform.scale * (1f - fadeFraction * 0.5f)
+            canvas.drawCircle(transform.screenX(impact.x), transform.screenY(impact.y), radius, impactPaint)
         }
         impactPaint.alpha = 255
     }
 
-    private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, scaleX: Float, scaleY: Float) {
-        val cx = tank.x * scaleX
-        val cy = tank.y * scaleY
+    private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, transform: WorldTransform) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
 
         val leftX = (tank.x - SLOPE_SAMPLE_OFFSET).toInt()
         val rightX = (tank.x + SLOPE_SAMPLE_OFFSET).toInt()
         val riseTerrain = (terrain.heightAt(rightX) - terrain.heightAt(leftX)).toFloat()
+        // Both the rise and run are world-space distances scaled by the same uniform
+        // factor, so it cancels out of the ratio - this angle is just as valid computed
+        // in world space directly, but staying in already-scaled screen units here avoids
+        // a second unit system for no benefit.
         val slopeDeg = Math.toDegrees(
-            atan2((riseTerrain * scaleY).toDouble(), (2 * SLOPE_SAMPLE_OFFSET * scaleX).toDouble()),
+            atan2(riseTerrain.toDouble(), (2 * SLOPE_SAMPLE_OFFSET).toDouble()),
         ).toFloat()
 
         tankBodyPaint.color = tank.color
         canvas.save()
         canvas.rotate(slopeDeg, cx, cy)
-        canvas.drawRect(cx - TANK_HALF_WIDTH, cy - TANK_HALF_WIDTH, cx + TANK_HALF_WIDTH, cy, tankBodyPaint)
+        canvas.drawRect(cx - halfWidth, cy - halfWidth, cx + halfWidth, cy, tankBodyPaint)
         canvas.restore()
 
         // Barrel angle is an absolute aim reference, so it's drawn unrotated by slope.
         // Full-circle convention matches PhysicsStep.launchVelocity exactly - no separate
         // facing flag, cos/sin alone cover all four quadrants.
         val angleRad = Math.toRadians(tank.angleDeg.toDouble())
-        val endX = cx + (cos(angleRad) * BARREL_LENGTH).toFloat()
-        val endY = cy - (sin(angleRad) * BARREL_LENGTH).toFloat()
+        val barrelLength = BARREL_LENGTH * transform.scale
+        val endX = cx + (cos(angleRad) * barrelLength).toFloat()
+        val endY = cy - (sin(angleRad) * barrelLength).toFloat()
+        barrelPaint.strokeWidth = BARREL_STROKE_WIDTH * transform.scale
         canvas.drawLine(cx, cy, endX, endY, barrelPaint)
 
-        val barTop = cy - TANK_HALF_WIDTH - HEALTH_BAR_GAP
-        canvas.drawRect(cx - HEALTH_BAR_WIDTH / 2, barTop, cx + HEALTH_BAR_WIDTH / 2, barTop + HEALTH_BAR_HEIGHT, healthBarBackPaint)
+        val healthBarWidth = HEALTH_BAR_WIDTH * transform.scale
+        val healthBarHeight = HEALTH_BAR_HEIGHT * transform.scale
+        val barTop = cy - halfWidth - HEALTH_BAR_GAP * transform.scale
+        canvas.drawRect(cx - healthBarWidth / 2, barTop, cx + healthBarWidth / 2, barTop + healthBarHeight, healthBarBackPaint)
         val healthFraction = (tank.health.toFloat() / Tank.MAX_HEALTH).coerceIn(0f, 1f)
         canvas.drawRect(
-            cx - HEALTH_BAR_WIDTH / 2,
+            cx - healthBarWidth / 2,
             barTop,
-            cx - HEALTH_BAR_WIDTH / 2 + HEALTH_BAR_WIDTH * healthFraction,
-            barTop + HEALTH_BAR_HEIGHT,
+            cx - healthBarWidth / 2 + healthBarWidth * healthFraction,
+            barTop + healthBarHeight,
             healthBarFillPaint,
         )
     }
@@ -148,11 +173,13 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     companion object {
         private const val CRATER_STROKE_WIDTH = 40f
         private const val PROJECTILE_RADIUS = 5f
+        private const val BARREL_STROKE_WIDTH = 5f
 
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of
         // these scale proportionally with it (4x the old 14f-radius tuning: barrel 26->104,
-        // health bar 32x5->128x20, gap 14->56, slope sample offset 12->48).
+        // health bar 32x5->128x20, gap 14->56, slope sample offset 12->48). All are world-
+        // space units, scaled by WorldTransform.scale like every other size in this file.
         private const val TANK_HALF_WIDTH = Tank.RADIUS
         private const val BARREL_LENGTH = 104f
         private const val HEALTH_BAR_WIDTH = 128f
