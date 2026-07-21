@@ -1,7 +1,9 @@
 package com.scorchedphoto.app.game.hud
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
@@ -55,11 +57,25 @@ fun AngleRing(
             }
             .size(TOUCH_RADIUS * 2)
             .pointerInput(Unit) {
-                detectDragGestures { change, _ ->
-                    change.consume()
-                    val dx = change.position.x - touchRadiusPx
-                    val dy = change.position.y - touchRadiusPx
-                    onCommand(GameCommand.SetAngle(screenOffsetToAngleDeg(dx, dy)))
+                // Applies the touch position the instant a finger goes down, then tracks
+                // every subsequent move directly via drag() - not detectDragGestures(),
+                // whose onDrag only fires once movement exceeds the platform's touch-slop
+                // threshold. A deliberate tap straight at the intended angle (no preceding
+                // drag) would otherwise never register at all, silently leaving the tank
+                // aimed at whatever angle it already had.
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    down.consume()
+                    fun applyAngle(position: Offset) {
+                        val dx = position.x - touchRadiusPx
+                        val dy = position.y - touchRadiusPx
+                        onCommand(GameCommand.SetAngle(screenOffsetToAngleDeg(dx, dy)))
+                    }
+                    applyAngle(down.position)
+                    drag(down.id) { change ->
+                        change.consume()
+                        applyAngle(change.position)
+                    }
                 }
             },
     ) {

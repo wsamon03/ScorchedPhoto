@@ -149,7 +149,7 @@ class GameEngine(
      */
     private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
         CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
-        activeImpactEffects += ImpactEffect(impactX, impactY)
+        activeImpactEffects += ImpactEffect(impactX, impactY, projectile.weapon.blastRadius)
         for (tank in tanks) {
             if (!tank.alive) continue
             val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)

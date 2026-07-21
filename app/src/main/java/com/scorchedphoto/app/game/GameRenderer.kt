@@ -98,7 +98,11 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
             val fadeFraction = (1f - impact.age / IMPACT_EFFECT_LIFETIME_SECONDS).coerceIn(0f, 1f)
             if (fadeFraction <= 0f) continue
             impactPaint.alpha = (fadeFraction * 255).toInt()
-            val radius = IMPACT_MAX_RADIUS * (1f - fadeFraction * 0.5f)
+            // Sized to the weapon's actual blast radius (the same radius CraterCarver and
+            // DamageCalculator use, kept unscaled like TANK_HALF_WIDTH below) so the flash
+            // visually matches the area that's actually affected, shrinking slightly as it
+            // fades rather than starting from a fixed size.
+            val radius = impact.blastRadius * (1f - fadeFraction * 0.5f)
             canvas.drawCircle(impact.x * scaleX, impact.y * scaleY, radius, impactPaint)
         }
         impactPaint.alpha = 255
@@ -156,7 +160,6 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         private const val HEALTH_BAR_GAP = 56f
         private const val SLOPE_SAMPLE_OFFSET = 48
 
-        private const val IMPACT_MAX_RADIUS = 34f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
     }
 }
