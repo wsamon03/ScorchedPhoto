@@ -19,10 +19,11 @@ import kotlin.math.sin
 /**
  * Draws one frame onto the [GameSurfaceView]'s [Canvas]: the photo as a backdrop, a dark
  * scar over any column craters have carved lower than the original terrain, projectiles,
- * fading impact flashes, and tanks (body tilted to the local slope, a barrel indicating
- * aim, and a small health bar). Every world-space position and size is mapped through a
- * single [WorldTransform.fit] (see its doc for why: independent x/y scale factors distort
- * launch angles and motion).
+ * fading impact flashes, and tanks (body tilted to the local slope, with a barrel
+ * indicating aim - health is shown only in the HUD's [com.scorchedphoto.app.game.hud.HealthBarRow],
+ * not repeated next to each tank here). Every world-space position and size is mapped
+ * through a single [WorldTransform.fit] (see its doc for why: independent x/y scale
+ * factors distort launch angles and motion).
  */
 class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntArray) {
 
@@ -39,8 +40,6 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     }
     private val projectilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val impactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 255, 160, 40) }
-    private val healthBarBackPaint = Paint().apply { color = Color.argb(180, 0, 0, 0) }
-    private val healthBarFillPaint = Paint().apply { color = Color.argb(220, 60, 200, 60) }
 
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
@@ -156,19 +155,6 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         val endY = cy - (sin(angleRad) * barrelLength).toFloat()
         barrelPaint.strokeWidth = BARREL_STROKE_WIDTH * transform.scale
         canvas.drawLine(cx, cy, endX, endY, barrelPaint)
-
-        val healthBarWidth = HEALTH_BAR_WIDTH * transform.scale
-        val healthBarHeight = HEALTH_BAR_HEIGHT * transform.scale
-        val barTop = cy - halfWidth - HEALTH_BAR_GAP * transform.scale
-        canvas.drawRect(cx - healthBarWidth / 2, barTop, cx + healthBarWidth / 2, barTop + healthBarHeight, healthBarBackPaint)
-        val healthFraction = (tank.health.toFloat() / Tank.MAX_HEALTH).coerceIn(0f, 1f)
-        canvas.drawRect(
-            cx - healthBarWidth / 2,
-            barTop,
-            cx - healthBarWidth / 2 + healthBarWidth * healthFraction,
-            barTop + healthBarHeight,
-            healthBarFillPaint,
-        )
     }
 
     /** Builds [shape]'s normalized outline (see [TankShape]) into a screen-space [Path]. */
@@ -191,14 +177,10 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of
         // these scale proportionally with it (4x the old 14f-radius tuning, then halved
-        // back down: barrel 26->104->52, health bar 32x5->128x20->64x10, gap 14->56->28,
-        // slope sample offset 12->48->24). All are world-space units, scaled by
-        // WorldTransform.scale like every other size in this file.
+        // back down: barrel 26->104->52, slope sample offset 12->48->24). All are world-
+        // space units, scaled by WorldTransform.scale like every other size in this file.
         private const val TANK_HALF_WIDTH = Tank.RADIUS
         private const val BARREL_LENGTH = 52f
-        private const val HEALTH_BAR_WIDTH = 64f
-        private const val HEALTH_BAR_HEIGHT = 10f
-        private const val HEALTH_BAR_GAP = 28f
         private const val SLOPE_SAMPLE_OFFSET = 24
 
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
