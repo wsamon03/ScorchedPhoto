@@ -29,8 +29,8 @@ data class Tank(
          * working-image pixel scale as [com.scorchedphoto.engine.physics.GRAVITY] etc.
          * Shared by rendering (`GameRenderer`) and hit detection (`GameEngine`) so the
          * two always agree on how big a tank actually is - was 14f, 4x'd to 56f, halved
-         * back down to 28f, halved again to 14f.
+         * back down to 28f, halved to 14f, halved again to 7f.
          */
-        const val RADIUS = 14f
+        const val RADIUS = 7f
     }
 }
