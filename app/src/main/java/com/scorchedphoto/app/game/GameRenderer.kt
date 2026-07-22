@@ -228,10 +228,10 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         private const val BARREL_LENGTH = 26f
         private const val SLOPE_SAMPLE_OFFSET = 12
 
-        // Explosion animation phases: grow from 0 to full over 0.5s, hold for 1s, fade for 1s.
-        private const val GROWTH_SECONDS = 0.5f
-        private const val HOLD_SECONDS = 1f
-        private const val FADE_SECONDS = 1f
+        // Explosion animation phases: grow from 0 to full over 0.25s, hold for 0.5s, fade for 0.5s.
+        private const val GROWTH_SECONDS = 0.25f
+        private const val HOLD_SECONDS = 0.5f
+        private const val FADE_SECONDS = 0.5f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = GROWTH_SECONDS + HOLD_SECONDS + FADE_SECONDS
     }
 }
