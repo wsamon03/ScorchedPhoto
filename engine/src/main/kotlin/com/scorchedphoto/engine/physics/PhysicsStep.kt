@@ -15,9 +15,10 @@ const val WIND_SCALE = 4f
 // tactical aiming variety and avoiding dominance by simple max-power shots.
 const val POWER_SCALE = 6.5f
 
-// A tank's usable power falls off as it takes damage: at 0 health it can still fire, but
-// at only (1 - INJURED_POWER_PENALTY) of a full-health tank's power.
-const val INJURED_POWER_PENALTY = 0.5f
+// A tank's usable power falls off as it takes damage. The penalty is 75% of the percent
+// of health lost: a tank at 20% health (lost 80%) can fire at 40% power (reduction of 60%).
+// At 0 health it can still fire at 25% power.
+const val INJURED_POWER_PENALTY = 0.75f
 
 // One full 0 -> 100 -> 0 sweep of the hold-to-charge power meter. A UX timing constant
 // (not physics-derived like POWER_SCALE/GRAVITY) - tune freely by feel. Doubled (was
@@ -88,10 +89,10 @@ fun oscillatingPower(elapsedSeconds: Float, periodSeconds: Float = POWER_CHARGE_
 }
 
 /**
- * A tank's maximum power decreases as it loses health: the drop is
- * [INJURED_POWER_PENALTY] of the percentage of health it has lost, so a tank at 50%
- * health fires at 1 - 0.5*50% = 75% of full-health power/range, and a tank at 0 health
- * still fires at 1 - 0.5*100% = 50% power rather than being unable to fire at all.
+ * A tank's maximum power decreases as it loses health: the reduction is
+ * [INJURED_POWER_PENALTY] (75%) of the percentage of health it has lost, so a tank at 50%
+ * health fires at 1 - 0.75*50% = 62.5% of full-health power/range, and a tank at 0 health
+ * still fires at 1 - 0.75*100% = 25% power rather than being unable to fire at all.
  */
 fun healthPowerMultiplier(health: Int, maxHealth: Int): Float {
     val healthFraction = (health.toFloat() / maxHealth).coerceIn(0f, 1f)
