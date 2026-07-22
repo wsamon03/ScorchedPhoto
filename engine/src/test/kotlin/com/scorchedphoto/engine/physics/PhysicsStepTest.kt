@@ -144,19 +144,19 @@ class PhysicsStepTest {
     }
 
     @Test
-    fun `healthPowerMultiplier is 0_75 at half health`() {
-        assertEquals(0.75f, healthPowerMultiplier(health = 50, maxHealth = 100), 0.001f)
+    fun `healthPowerMultiplier is 0_625 at half health`() {
+        assertEquals(0.625f, healthPowerMultiplier(health = 50, maxHealth = 100), 0.001f)
     }
 
     @Test
-    fun `healthPowerMultiplier floors at 0_5 when health reaches zero`() {
-        assertEquals(0.5f, healthPowerMultiplier(health = 0, maxHealth = 100), 0.001f)
+    fun `healthPowerMultiplier floors at 0_25 when health reaches zero`() {
+        assertEquals(0.25f, healthPowerMultiplier(health = 0, maxHealth = 100), 0.001f)
     }
 
     @Test
     fun `healthPowerMultiplier is clamped for out-of-range health`() {
         assertEquals(1f, healthPowerMultiplier(health = 150, maxHealth = 100), 0.001f)
-        assertEquals(0.5f, healthPowerMultiplier(health = -20, maxHealth = 100), 0.001f)
+        assertEquals(0.25f, healthPowerMultiplier(health = -20, maxHealth = 100), 0.001f)
     }
 
     @Test
@@ -165,13 +165,13 @@ class PhysicsStepTest {
     }
 
     @Test
-    fun `maxPowerForHealth is 75 at half health`() {
-        assertEquals(75f, maxPowerForHealth(health = 50, maxHealth = 100), 0.01f)
+    fun `maxPowerForHealth is 62_5 at half health`() {
+        assertEquals(62.5f, maxPowerForHealth(health = 50, maxHealth = 100), 0.01f)
     }
 
     @Test
-    fun `maxPowerForHealth floors at 50 when health reaches zero`() {
-        assertEquals(50f, maxPowerForHealth(health = 0, maxHealth = 100), 0.01f)
+    fun `maxPowerForHealth floors at 25 when health reaches zero`() {
+        assertEquals(25f, maxPowerForHealth(health = 0, maxHealth = 100), 0.01f)
     }
 
     @Test

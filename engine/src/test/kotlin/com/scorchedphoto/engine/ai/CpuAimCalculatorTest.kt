@@ -101,7 +101,10 @@ class CpuAimCalculatorTest {
     fun `ideal solve still lands on target when the shooter is injured`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val shooter = testTank(id = 1, x = 400f, y = 500f, health = 40)
-        val target = testTank(id = 2, x = 750f, y = 500f)
+        // 300 units away: within the health-40 shooter's power ceiling (55, i.e. a max
+        // range of ~319 at this POWER_SCALE/GRAVITY) so the solve can actually land here,
+        // unlike the shooter's un-capped, full-health range which reaches much further.
+        val target = testTank(id = 2, x = 700f, y = 500f)
         val wind = Wind(0f)
 
         // The solve is already bounded by the shooter's actual power ceiling (see

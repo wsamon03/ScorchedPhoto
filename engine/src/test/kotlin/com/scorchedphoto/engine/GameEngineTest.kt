@@ -246,7 +246,7 @@ class GameEngineTest {
 
         val injuredEngine = GameEngine(terrain, listOf(halfHealthShooter, halfHealthTarget), maxWindMagnitude = 0f, rng = Random(1))
         halfHealthShooter.angleDeg = 45f
-        halfHealthShooter.power = 80f // requests more than its capped max (75)
+        halfHealthShooter.power = 80f // requests more than its capped max (62.5)
         injuredEngine.fire()
         val injuredSpeed = injuredEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
 
@@ -255,9 +255,9 @@ class GameEngineTest {
         val expectedHealthySpeed = hypot(expectedHealthyVx.toDouble(), expectedHealthyVy.toDouble())
         assertEquals(expectedHealthySpeed, healthySpeed, expectedHealthySpeed * 0.01)
 
-        // Half health caps max power at 75 (100 * (1 - 0.5*0.5)); the request of 80 clamps
+        // Half health caps max power at 62.5 (100 * (1 - 0.75*0.5)); the request of 80 clamps
         // down to that fixed ceiling rather than being scaled by a hidden multiplier.
-        val (expectedInjuredVx, expectedInjuredVy) = launchVelocity(45f, 75f)
+        val (expectedInjuredVx, expectedInjuredVy) = launchVelocity(45f, 62.5f)
         val expectedInjuredSpeed = hypot(expectedInjuredVx.toDouble(), expectedInjuredVy.toDouble())
         assertEquals(expectedInjuredSpeed, injuredSpeed, expectedInjuredSpeed * 0.01)
     }
