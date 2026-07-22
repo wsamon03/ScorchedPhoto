@@ -10,9 +10,10 @@ const val GRAVITY = 400f
 // Wind's contribution to horizontal drift is linear in this constant, so halving it
 // (was 8f) directly halves wind's effect on trajectories.
 const val WIND_SCALE = 4f
-// Range (no wind) is v^2*sin(2*angle)/GRAVITY, i.e. proportional to POWER_SCALE^2 - so
-// scaling this by sqrt(0.67) (was 12f) gives ~33% less range at the same power/angle.
-const val POWER_SCALE = 9.8f
+// Range (no wind) is v^2*sin(2*angle)/GRAVITY, i.e. proportional to POWER_SCALE^2 - tuned
+// so half-power shots travel about 1/3 of the 720px terrain width, leaving room for
+// tactical aiming variety and avoiding dominance by simple max-power shots.
+const val POWER_SCALE = 6.5f
 
 // A tank's usable power falls off as it takes damage: at 0 health it can still fire, but
 // at only (1 - INJURED_POWER_PENALTY) of a full-health tank's power.
