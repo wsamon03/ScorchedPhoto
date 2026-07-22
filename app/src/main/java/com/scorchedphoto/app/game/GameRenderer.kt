@@ -111,17 +111,61 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
 
     private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, transform: WorldTransform) {
         for (impact in impactEffects) {
-            val fadeFraction = (1f - impact.age / IMPACT_EFFECT_LIFETIME_SECONDS).coerceIn(0f, 1f)
-            if (fadeFraction <= 0f) continue
-            impactPaint.alpha = (fadeFraction * 255).toInt()
-            // Sized to the weapon's actual blast radius (the same radius CraterCarver and
-            // DamageCalculator use, in world space like everything else here) so the flash
-            // visually matches the area that's actually affected, shrinking slightly as it
-            // fades rather than starting from a fixed size.
-            val radius = impact.blastRadius * transform.scale * (1f - fadeFraction * 0.5f)
-            canvas.drawCircle(transform.screenX(impact.x), transform.screenY(impact.y), radius, impactPaint)
+            if (impact.age >= IMPACT_EFFECT_LIFETIME_SECONDS) continue
+
+            val screenX = transform.screenX(impact.x)
+            val screenY = transform.screenY(impact.y)
+            val maxRadius = impact.blastRadius * transform.scale
+
+            when {
+                impact.age < GROWTH_SECONDS -> {
+                    // Phase 1: grow from 0 to full size over 0.5 seconds
+                    val growthFraction = impact.age / GROWTH_SECONDS
+                    drawGradientCircle(canvas, screenX, screenY, maxRadius * growthFraction, growthFraction)
+                }
+                impact.age < GROWTH_SECONDS + HOLD_SECONDS -> {
+                    // Phase 2: hold at full size for 1 second
+                    drawGradientCircle(canvas, screenX, screenY, maxRadius, 1f)
+                }
+                else -> {
+                    // Phase 3: fade away over 1 second
+                    val fadeFraction = (IMPACT_EFFECT_LIFETIME_SECONDS - impact.age) / FADE_SECONDS
+                    drawGradientCircle(canvas, screenX, screenY, maxRadius, fadeFraction)
+                }
+            }
         }
         impactPaint.alpha = 255
+    }
+
+    private fun drawGradientCircle(canvas: Canvas, cx: Float, cy: Float, radius: Float, alphaMult: Float) {
+        if (radius <= 0f) return
+
+        // Draw from outside to inside for proper gradient layering: red -> yellow -> white
+        val steps = 20
+        for (i in steps downTo 1) {
+            val fraction = i.toFloat() / steps
+            val r = radius * fraction
+
+            val (red, green, blue) = when {
+                fraction > 0.66f -> {
+                    // Red to yellow: interpolate green from 0 to 255
+                    val colorFraction = (fraction - 0.66f) / 0.34f
+                    Triple(255, (colorFraction * 200).toInt(), 0)
+                }
+                fraction > 0.33f -> {
+                    // Yellow to white: interpolate green and blue from yellow towards white
+                    val colorFraction = (fraction - 0.33f) / 0.33f
+                    Triple(255, (200 + colorFraction * 55).toInt(), (colorFraction * 55).toInt())
+                }
+                else -> {
+                    // White center, fading to yellow: already white
+                    Triple(255, 255, 255)
+                }
+            }
+
+            impactPaint.color = Color.argb((alphaMult * 255).toInt(), red, green, blue)
+            canvas.drawCircle(cx, cy, r, impactPaint)
+        }
     }
 
     private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, transform: WorldTransform) {
@@ -170,19 +214,24 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     }
 
     companion object {
-        private const val CRATER_STROKE_WIDTH = 40f
+        private const val CRATER_STROKE_WIDTH = 20f
         private const val PROJECTILE_RADIUS = 5f
-        private const val BARREL_STROKE_WIDTH = 5f
+        private const val BARREL_STROKE_WIDTH = 2.5f
 
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of
         // these scale proportionally with it (4x the old 14f-radius tuning, then halved
-        // back down: barrel 26->104->52, slope sample offset 12->48->24). All are world-
-        // space units, scaled by WorldTransform.scale like every other size in this file.
+        // back down to 28f, now halved again to 14f: barrel 13->52->26, slope sample offset
+        // 6->24->12). All are world-space units, scaled by WorldTransform.scale like every
+        // other size in this file.
         private const val TANK_HALF_WIDTH = Tank.RADIUS
-        private const val BARREL_LENGTH = 52f
-        private const val SLOPE_SAMPLE_OFFSET = 24
+        private const val BARREL_LENGTH = 26f
+        private const val SLOPE_SAMPLE_OFFSET = 12
 
-        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
+        // Explosion animation phases: grow from 0 to full over 0.5s, hold for 1s, fade for 1s.
+        private const val GROWTH_SECONDS = 0.5f
+        private const val HOLD_SECONDS = 1f
+        private const val FADE_SECONDS = 1f
+        private const val IMPACT_EFFECT_LIFETIME_SECONDS = GROWTH_SECONDS + HOLD_SECONDS + FADE_SECONDS
     }
 }
