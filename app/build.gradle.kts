@@ -20,7 +20,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("release.keystore")
+            storeFile = file("${projectDir}/release.keystore")
             storePassword = "scorchedphoto"
             keyAlias = "scorchedphoto"
             keyPassword = "scorchedphoto"
