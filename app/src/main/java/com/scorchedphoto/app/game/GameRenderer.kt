@@ -40,6 +40,11 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     }
     private val projectilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val impactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 255, 160, 40) }
+    private val horizonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
 
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
@@ -69,6 +74,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         }
 
         drawCraterScars(canvas, terrain, transform)
+        drawHorizonLine(canvas, terrain, transform)
         drawImpactEffects(canvas, impactEffects, transform)
 
         for (projectile in projectiles) {
@@ -107,6 +113,24 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         }
         craterPaint.strokeWidth = CRATER_STROKE_WIDTH * transform.scale
         canvas.drawPath(path, craterPaint)
+    }
+
+    private fun drawHorizonLine(canvas: Canvas, terrain: HeightMap, transform: WorldTransform) {
+        val path = Path()
+        var started = false
+        for (x in 0 until terrain.width) {
+            val groundY = terrain.groundY[x]
+            val px = transform.screenX(x.toFloat())
+            val py = transform.screenY(groundY.toFloat())
+            if (!started) {
+                path.moveTo(px, py)
+                started = true
+            } else {
+                path.lineTo(px, py)
+            }
+        }
+        horizonPaint.strokeWidth = HORIZON_STROKE_WIDTH * transform.scale
+        canvas.drawPath(path, horizonPaint)
     }
 
     private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, transform: WorldTransform) {
@@ -215,6 +239,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
 
     companion object {
         private const val CRATER_STROKE_WIDTH = 10f
+        private const val HORIZON_STROKE_WIDTH = 3f
         private const val PROJECTILE_RADIUS = 5f
         private const val BARREL_STROKE_WIDTH = 1.25f
 
