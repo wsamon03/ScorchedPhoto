@@ -246,11 +246,11 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of
         // these scale proportionally with it (4x the old 14f-radius tuning, then halved
-        // back down to 28f, halved to 14f, halved again to 7f: barrel 13->52->26->13,
+        // back down to 28f, halved to 14f, halved again to 7f: barrel 13->52->26->13->9.75,
         // slope sample offset 6->24->12->6). All are world-space units, scaled by
         // WorldTransform.scale like every other size in this file.
         private const val TANK_HALF_WIDTH = Tank.RADIUS
-        private const val BARREL_LENGTH = 13f
+        private const val BARREL_LENGTH = 9.75f
         private const val SLOPE_SAMPLE_OFFSET = 6
 
         // Explosion animation phases: grow from 0 to full over 0.125s, hold for 0.25s, fade for 0.25s.
