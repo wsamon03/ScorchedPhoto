@@ -92,7 +92,7 @@ class GameEngine(
         applyTankGravity(dt)
         ageImpactEffects(dt)
 
-        if (activeProjectiles.isEmpty() && tanks.none { it.falling }) {
+        if (activeProjectiles.isEmpty() && tanks.none { it.falling } && activeImpactEffects.isEmpty()) {
             finishResolution()
         } else {
             phase = MatchPhase.RESOLVING
@@ -258,6 +258,7 @@ class GameEngine(
         // hurt) can actually kill, matching "not an automatic kill" like a direct hit is.
         private const val FALL_DAMAGE_MIN_DISTANCE = 20f
         private const val FALL_DAMAGE_PER_PIXEL = 0.4f
-        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.4f
+        // Explosion animation: 0.5s growth + 1s hold + 1s fade = 2.5s total
+        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 2.5f
     }
 }
