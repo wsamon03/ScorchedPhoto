@@ -90,6 +90,7 @@ class GameEngine(
 
         tickProjectiles(dt)
         applyTankGravity(dt)
+        updateBurningTanks(dt)
         ageImpactEffects(dt)
 
         if (activeProjectiles.isEmpty() && tanks.none { it.falling } && activeImpactEffects.isEmpty()) {
@@ -162,11 +163,17 @@ class GameEngine(
                     if (projectile.weapon.maxDamage > 0) {
                         tank.health = 0
                         tank.alive = false
+                        tank.burning = true
+                        tank.burningElapsed = 0f
                     }
                 }
                 damage > 0 -> {
                     tank.health = (tank.health - damage).coerceAtLeast(0)
-                    if (tank.health == 0) tank.alive = false
+                    if (tank.health == 0) {
+                        tank.alive = false
+                        tank.burning = true
+                        tank.burningElapsed = 0f
+                    }
                 }
             }
         }
@@ -228,7 +235,22 @@ class GameEngine(
         val damage = ((fallDistance - FALL_DAMAGE_MIN_DISTANCE) * FALL_DAMAGE_PER_PIXEL).toInt()
         if (damage > 0) {
             tank.health = (tank.health - damage).coerceAtLeast(0)
-            if (tank.health == 0) tank.alive = false
+            if (tank.health == 0) {
+                tank.alive = false
+                tank.burning = true
+                tank.burningElapsed = 0f
+            }
+        }
+    }
+
+    private fun updateBurningTanks(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.burning) continue
+            tank.burningElapsed += dt
+            if (tank.burningElapsed >= TANK_BURNING_DURATION_SECONDS) {
+                tank.burning = false
+                activeImpactEffects += ImpactEffect(tank.x, tank.y, Tank.RADIUS * 3f)
+            }
         }
     }
 
@@ -258,6 +280,7 @@ class GameEngine(
         // hurt) can actually kill, matching "not an automatic kill" like a direct hit is.
         private const val FALL_DAMAGE_MIN_DISTANCE = 20f
         private const val FALL_DAMAGE_PER_PIXEL = 0.4f
+        private const val TANK_BURNING_DURATION_SECONDS = 2f
         // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
     }

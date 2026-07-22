@@ -87,8 +87,11 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         }
 
         for (tank in tanks) {
-            if (!tank.alive) continue
+            if (!tank.alive && !tank.burning) continue
             drawTank(canvas, tank, terrain, transform)
+            if (tank.burning) {
+                drawBurningTank(canvas, tank, transform)
+            }
         }
     }
 
@@ -223,6 +226,16 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         val endY = cy - (sin(angleRad) * barrelLength).toFloat()
         barrelPaint.strokeWidth = BARREL_STROKE_WIDTH * transform.scale
         canvas.drawLine(cx, cy, endX, endY, barrelPaint)
+    }
+
+    private fun drawBurningTank(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val burnRadius = (TANK_HALF_WIDTH + 2f) * transform.scale
+        val burningPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(200, 255, 100, 0)
+        }
+        canvas.drawCircle(cx, cy, burnRadius, burningPaint)
     }
 
     /** Builds [shape]'s normalized outline (see [TankShape]) into a screen-space [Path]. */
