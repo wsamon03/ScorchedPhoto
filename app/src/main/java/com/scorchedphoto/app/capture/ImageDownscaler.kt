@@ -11,7 +11,7 @@ import java.io.InputStream
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-private const val WORKING_LONG_EDGE = 720
+private const val WORKING_LONG_EDGE = 480
 
 /** Bitmap <-> :terrain's platform-agnostic PixelBuffer, kept as the only Android-aware seam. */
 object ImageDownscaler {

@@ -258,7 +258,7 @@ class GameEngine(
         // hurt) can actually kill, matching "not an automatic kill" like a direct hit is.
         private const val FALL_DAMAGE_MIN_DISTANCE = 20f
         private const val FALL_DAMAGE_PER_PIXEL = 0.4f
-        // Explosion animation: 0.25s growth + 0.5s hold + 0.5s fade = 1.25s total
-        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 1.25f
+        // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
+        private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
     }
 }
