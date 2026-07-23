@@ -20,6 +20,7 @@ data class Tank(
     var fallVelocity: Float = 0f,
     var burning: Boolean = false,
     var burningElapsed: Float = 0f,
+    var pendingBurn: Boolean = false,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {

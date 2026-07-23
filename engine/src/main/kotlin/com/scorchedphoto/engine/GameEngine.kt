@@ -90,10 +90,17 @@ class GameEngine(
 
         tickProjectiles(dt)
         applyTankGravity(dt)
-        updateBurningTanks(dt)
         ageImpactEffects(dt)
+        updateBurningTanks(dt)
+        startPendingBurns()
 
-        if (activeProjectiles.isEmpty() && tanks.none { it.falling } && activeImpactEffects.isEmpty()) {
+        // Explosions (from projectiles still flying or still-animating impact flashes)
+        // must fully finish before any death animation begins - see startPendingBurns -
+        // and death animations (burning, then its own closing explosion) must fully
+        // finish before the turn can advance or a win can be declared.
+        val explosionsDone = activeProjectiles.isEmpty() && activeImpactEffects.isEmpty()
+        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn }
+        if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone) {
             finishResolution()
         } else {
             phase = MatchPhase.RESOLVING
@@ -163,16 +170,14 @@ class GameEngine(
                     if (projectile.weapon.maxDamage > 0) {
                         tank.health = 0
                         tank.alive = false
-                        tank.burning = true
-                        tank.burningElapsed = 0f
+                        tank.pendingBurn = true
                     }
                 }
                 damage > 0 -> {
                     tank.health = (tank.health - damage).coerceAtLeast(0)
                     if (tank.health == 0) {
                         tank.alive = false
-                        tank.burning = true
-                        tank.burningElapsed = 0f
+                        tank.pendingBurn = true
                     }
                 }
             }
@@ -237,8 +242,7 @@ class GameEngine(
             tank.health = (tank.health - damage).coerceAtLeast(0)
             if (tank.health == 0) {
                 tank.alive = false
-                tank.burning = true
-                tank.burningElapsed = 0f
+                tank.pendingBurn = true
             }
         }
     }
@@ -251,6 +255,23 @@ class GameEngine(
                 tank.burning = false
                 activeImpactEffects += ImpactEffect(tank.x, tank.y, Tank.RADIUS * 3f)
             }
+        }
+    }
+
+    /**
+     * Tanks that died this resolution wait in [Tank.pendingBurn] rather than starting
+     * their burn animation immediately - only once every projectile explosion (both
+     * still-flying projectiles and still-animating impact flashes) has fully finished do
+     * they actually start burning, so a death's fire animation never overlaps the blast
+     * that caused it.
+     */
+    private fun startPendingBurns() {
+        if (activeProjectiles.isNotEmpty() || activeImpactEffects.isNotEmpty()) return
+        for (tank in tanks) {
+            if (!tank.pendingBurn) continue
+            tank.pendingBurn = false
+            tank.burning = true
+            tank.burningElapsed = 0f
         }
     }
 
