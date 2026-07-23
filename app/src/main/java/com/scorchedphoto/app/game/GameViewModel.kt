@@ -6,6 +6,7 @@ import com.scorchedphoto.app.capture.PhotoRepository
 import com.scorchedphoto.app.result.MatchResultRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
+import com.scorchedphoto.app.tts.DeathLineSpeaker
 import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
@@ -27,6 +28,7 @@ class GameViewModel @Inject constructor(
     matchConfigRepository: MatchConfigRepository,
     photoRepository: PhotoRepository,
     private val matchResultRepository: MatchResultRepository,
+    private val deathLineSpeaker: DeathLineSpeaker,
 ) : ViewModel() {
 
     val engine: GameEngine
@@ -37,6 +39,9 @@ class GameViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(GameUiState())
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+
+    private data class TankVoiceSettings(val voiceId: String?, val pitch: Float, val speechRate: Float)
+    private val voiceSettings: List<TankVoiceSettings>
 
     init {
         val storedHeightMap = requireNotNull(terrainRepository.heightMap) {
@@ -71,11 +76,20 @@ class GameViewModel @Inject constructor(
         }
 
         engine = GameEngine(heightMap, tanks)
+        voiceSettings = matchConfig.tankConfigs.map { TankVoiceSettings(it.voiceId, it.pitch, it.speechRate) }
         publishState()
     }
 
     fun submitCommand(command: GameCommand) {
         commandQueue.offer(command)
+    }
+
+    /** Called by [GameRenderer] (via [GameSurfaceView]) the moment a tank's death taunt is
+     * assigned - see GameRenderer.burnMessageFor - so it's spoken exactly once per death,
+     * in that tank's own chosen voice/pitch/rate. Safe to call from any thread. */
+    fun onBurnMessageAssigned(tankId: Int, spokenText: String) {
+        val settings = voiceSettings.getOrElse(tankId) { TankVoiceSettings(null, 1f, 1f) }
+        deathLineSpeaker.speak(spokenText, settings.voiceId, settings.pitch, settings.speechRate)
     }
 
     /** Called by [GameLoopThread] after each tick; safe to call from any thread. */

@@ -9,6 +9,10 @@ data class TankConfig(
     val isCpu: Boolean,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
+    // null voiceId means "use the TTS engine's own default voice" (see VoiceOption.SYSTEM_DEFAULT).
+    val voiceId: String? = null,
+    val pitch: Float = 1.0f,
+    val speechRate: Float = 1.0f,
 )
 
 data class MatchConfig(val tankConfigs: List<TankConfig>)

@@ -27,7 +27,12 @@ import kotlin.math.sin
  * through a single [WorldTransform.fit] (see its doc for why: independent x/y scale
  * factors distort launch angles and motion).
  */
-class GameRenderer(private val context: Context, private val photo: Bitmap?, private val originalGroundY: IntArray) {
+class GameRenderer(
+    private val context: Context,
+    private val photo: Bitmap?,
+    private val originalGroundY: IntArray,
+    private val onBurnMessageAssigned: (tankId: Int, spokenText: String) -> Unit = { _, _ -> },
+) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val craterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -72,7 +77,7 @@ class GameRenderer(private val context: Context, private val photo: Bitmap?, pri
 
     // A tank's taunt is picked once, the first time it's drawn burning, and kept for the
     // whole burn rather than re-rolled every frame - see burnMessageFor.
-    private val burnMessages = mutableMapOf<Int, String>()
+    private val burnMessages = mutableMapOf<Int, BurnTaunt>()
 
     // Tracks how long the current tank's turn has been active, purely for the
     // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
@@ -302,14 +307,17 @@ class GameRenderer(private val context: Context, private val photo: Bitmap?, pri
         val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
 
-        drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank))
+        drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank).displayText)
     }
 
     /** The taunt a burning tank is showing - assigned once (the first time this tank is
      * drawn burning) and held for the rest of its burn, since only actively-burning tanks
      * ever reach this call. A tank dies at most once per match, so the entry is simply
-     * left behind afterward - harmless, and gone once this renderer's match ends. */
-    private fun burnMessageFor(tank: Tank): String = burnMessages.getOrPut(tank.id) { BURN_MESSAGES.random() }
+     * left behind afterward - harmless, and gone once this renderer's match ends. Fires
+     * [onBurnMessageAssigned] exactly once per death (inside [getOrPut]'s lambda, which
+     * only ever runs on first insert) so the caller can speak it via TTS. */
+    private fun burnMessageFor(tank: Tank): BurnTaunt =
+        burnMessages.getOrPut(tank.id) { BURN_TAUNTS.random().also { onBurnMessageAssigned(tank.id, it.spokenText) } }
 
     private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
         val fm = speechBubbleTextPaint.fontMetrics
@@ -391,12 +399,16 @@ class GameRenderer(private val context: Context, private val photo: Bitmap?, pri
         private const val FIRE_FRAME_DURATION_MS = 160L
         private const val FIRE_DISPLAY_HEIGHT = TANK_HALF_WIDTH * 4f
 
-        private val BURN_MESSAGES = listOf(
-            "Not again!",
-            "#\$@!",
-            "Ouch! That hurts!",
-            "I'll get you next time!",
-            "Why me?",
+        // spokenText differs from displayText only for the censored line: the bubble
+        // still shows the symbols, but TTS reads a natural stand-in instead of literally
+        // sounding out "hash dollar at exclamation mark".
+        private data class BurnTaunt(val displayText: String, val spokenText: String = displayText)
+        private val BURN_TAUNTS = listOf(
+            BurnTaunt("Not again!"),
+            BurnTaunt("#\$@!", spokenText = "Argh!!"),
+            BurnTaunt("Ouch! That hurts!"),
+            BurnTaunt("I'll get you next time!"),
+            BurnTaunt("Why me?"),
         )
         private const val BUBBLE_PADDING_X = 12f
         private const val BUBBLE_PADDING_Y = 8f

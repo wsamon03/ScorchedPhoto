@@ -6,6 +6,18 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
+    <!-- Package-visibility (API 30+) declarations so DeathLineSpeaker's TextToSpeech can
+         actually bind to the device's engine, and the setup screen's "install more voices"
+         shortcut can resolve, without either silently failing. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+        <intent>
+            <action android:name="android.speech.tts.engine.INSTALL_TTS_DATA" />
+        </intent>
+    </queries>
+
     <application
         android:name=".ScorchedPhotoApp"
         android:allowBackup="true"

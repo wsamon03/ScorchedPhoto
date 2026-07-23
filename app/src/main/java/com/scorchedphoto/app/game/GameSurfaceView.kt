@@ -19,10 +19,11 @@ class GameSurfaceView(
     photo: Bitmap?,
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
+    onBurnMessageAssigned: (Int, String) -> Unit,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
     private val originalGroundY = engine.terrain.groundY.copyOf()
-    private val renderer = GameRenderer(context, photo, originalGroundY)
+    private val renderer = GameRenderer(context, photo, originalGroundY, onBurnMessageAssigned)
     private var loopThread: GameLoopThread? = null
 
     init {

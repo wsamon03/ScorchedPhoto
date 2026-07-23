@@ -1,5 +1,9 @@
 package com.scorchedphoto.app.setup
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,13 +20,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,15 +39,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
+
+private const val RHVOICE_URL = "https://f-droid.org/packages/com.github.olga_yakovleva.rhvoice.android/"
+private val PITCH_RATE_RANGE = 0.5f..2.0f
 
 @Composable
 fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hiltViewModel()) {
     val tankConfigs by viewModel.tankConfigs.collectAsStateWithLifecycle()
+    val availableVoices by viewModel.availableVoices.collectAsStateWithLifecycle()
+    var showMoreVoicesDialog by remember { mutableStateOf(false) }
 
     Scaffold { padding ->
         Column(
@@ -73,13 +88,27 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
                 }
             }
 
+            Text(
+                "Want More Voices?",
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier
+                    .clickable { showMoreVoicesDialog = true }
+                    .padding(bottom = 8.dp),
+            )
+
             LazyColumn(modifier = Modifier.weight(1f)) {
                 itemsIndexed(tankConfigs) { index, config ->
                     TankConfigRow(
                         config = config,
+                        availableVoices = availableVoices,
                         onToggleCpu = { viewModel.toggleCpu(index) },
                         onDifficultyChange = { viewModel.setDifficulty(index, it) },
                         onShapeChange = { viewModel.setShape(index, it) },
+                        onVoiceChange = { viewModel.setVoice(index, it) },
+                        onPitchChange = { viewModel.setPitch(index, it) },
+                        onSpeechRateChange = { viewModel.setSpeechRate(index, it) },
+                        onTest = { viewModel.testVoice(index) },
                     )
                 }
             }
@@ -97,14 +126,79 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
             }
         }
     }
+
+    if (showMoreVoicesDialog) {
+        WantMoreVoicesDialog(onDismiss = { showMoreVoicesDialog = false })
+    }
+}
+
+@Composable
+private fun WantMoreVoicesDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Want More Voices?") },
+        text = {
+            Column {
+                Text(
+                    "More voices for your current text-to-speech engine are installed " +
+                        "through your phone's system settings (Settings → Accessibility " +
+                        "→ Text-to-speech output → your engine → Install voice " +
+                        "data). Installed voices show up here automatically.",
+                )
+                Text(
+                    "For entirely different-sounding voices, install an alternative " +
+                        "text-to-speech engine app and set it as your device's default in " +
+                        "system settings - for example, RHVoice, a free and open-source " +
+                        "option:",
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+                Text(
+                    RHVOICE_URL,
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clickable {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RHVOICE_URL)))
+                        }
+                        .padding(top = 4.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Not every engine supports this shortcut into its own voice-download UI.
+                    try {
+                        context.startActivity(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+                    } catch (_: ActivityNotFoundException) {
+                        // No handler for it on this device/engine - the dialog's own
+                        // instructions above are the fallback path.
+                    }
+                },
+            ) {
+                Text("Open Voice Settings")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+    )
 }
 
 @Composable
 private fun TankConfigRow(
     config: TankConfig,
+    availableVoices: List<VoiceOption>,
     onToggleCpu: () -> Unit,
     onDifficultyChange: (Difficulty) -> Unit,
     onShapeChange: (TankShape) -> Unit,
+    onVoiceChange: (String?) -> Unit,
+    onPitchChange: (Float) -> Unit,
+    onSpeechRateChange: (Float) -> Unit,
+    onTest: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
@@ -134,6 +228,57 @@ private fun TankConfigRow(
             onSelect = onShapeChange,
             modifier = Modifier.padding(top = 6.dp),
         )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            VoiceDropdown(selected = config.voiceId, options = availableVoices, onSelect = onVoiceChange)
+            Button(onClick = onTest, modifier = Modifier.padding(start = 8.dp)) {
+                Text("Test")
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Pitch", modifier = Modifier.padding(end = 4.dp))
+            Slider(
+                value = config.pitch,
+                onValueChange = onPitchChange,
+                valueRange = PITCH_RATE_RANGE,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Rate", modifier = Modifier.padding(end = 4.dp))
+            Slider(
+                value = config.speechRate,
+                onValueChange = onSpeechRateChange,
+                valueRange = PITCH_RATE_RANGE,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceDropdown(selected: String?, options: List<VoiceOption>, onSelect: (String?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.id == selected }?.displayName ?: VoiceOption.SYSTEM_DEFAULT.displayName
+    Box {
+        Button(onClick = { expanded = true }) {
+            Text(selectedLabel)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { voice ->
+                DropdownMenuItem(
+                    text = { Text(voice.displayName) },
+                    onClick = {
+                        onSelect(voice.id)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 
