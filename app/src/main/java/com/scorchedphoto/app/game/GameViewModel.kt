@@ -50,6 +50,10 @@ class GameViewModel @Inject constructor(
             "GameScreen reached with no match configured"
         }
 
+        // Freshly time-seeded (not a fixed/injected Random) so tanks land somewhere new
+        // each time this ViewModel is constructed - including "Rematch", which navigates
+        // to a brand-new Game.route backstack entry (see ScorchedNavGraph) and therefore
+        // a brand-new GameViewModel/init run rather than reusing the previous match's.
         val positions = TankPlacement.placeX(heightMap, matchConfig.tankConfigs.size, Random(System.nanoTime()))
         val tanks = matchConfig.tankConfigs.mapIndexed { index, config ->
             Tank(

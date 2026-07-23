@@ -7,46 +7,57 @@ import kotlin.math.min
 import kotlin.random.Random
 
 /**
- * Picks x-positions for [count] tanks along the terrain. Divides the usable width into
- * one slot per tank and keeps each tank's final position strictly inside its own slot,
- * so slots never overlap regardless of the local flattening search below; a randomized
- * starting point within the slot, nudged toward flatter ground, keeps placement from
- * looking perfectly evenly spaced. Every slot but the last also reserves [MIN_GAP] at its
- * trailing edge (see below) so tanks themselves - not just their slots - never overlap.
+ * Picks x-positions for [count] tanks anywhere along the terrain - no fixed left-to-right
+ * ordering tying tank index to horizontal position, just [MIN_GAP] of clearance between
+ * every pair so tank bodies (each [Tank.RADIUS] wide) never overlap. Rejection-sampled:
+ * for each tank in turn, retry random candidates until one clears every already-placed
+ * tank, then nudge it toward flatter nearby ground without ever giving up that clearance.
  */
 object TankPlacement {
 
-    // A full tank diameter: even in the worst case, where one tank lands at the very
-    // edge of its search range and the next lands at the very start of its own slot,
-    // this is the closest their centers can end up - guaranteeing their bodies (each
-    // Tank.RADIUS wide) never overlap.
+    // A full tank diameter - the closest two tank centers can ever end up while their
+    // bodies (each Tank.RADIUS wide) still avoid touching.
     private val MIN_GAP = (2 * Tank.RADIUS).toInt().coerceAtLeast(1)
+    private const val MAX_SAMPLE_ATTEMPTS = 200
+    private const val FLATTEN_WINDOW = 10
 
     fun placeX(terrain: HeightMap, count: Int, rng: Random = Random.Default): List<Int> {
         require(count > 0) { "count must be positive" }
 
         val margin = max(1, terrain.width / 20)
-        val usableWidth = (terrain.width - 2 * margin).coerceAtLeast(count)
-        val slotWidth = usableWidth / count
+        val lo = margin
+        val hi = (terrain.width - margin - 1).coerceAtLeast(lo)
 
-        return (0 until count).map { i ->
-            val slotStart = margin + i * slotWidth
-            val slotEnd = if (i == count - 1) margin + usableWidth else slotStart + slotWidth
-            val slotHi = (slotEnd - 1).coerceAtLeast(slotStart)
-            // Reserving MIN_GAP off the trailing edge of every slot but the last means
-            // this tank's furthest possible position and the next slot's earliest
-            // possible position are always at least MIN_GAP apart, regardless of where
-            // within each (reduced) range the flattest-ground search actually lands.
-            val searchHi = if (i == count - 1) slotHi else (slotHi - MIN_GAP).coerceAtLeast(slotStart)
-            val candidate = if (searchHi > slotStart) rng.nextInt(slotStart, searchHi + 1) else slotStart
-            findFlattestWithinSlot(terrain, candidate, slotStart, searchHi)
+        val placed = mutableListOf<Int>()
+        repeat(count) {
+            val candidate = sampleCandidate(lo, hi, placed, rng)
+            placed += findFlattestNearby(terrain, candidate, lo, hi, placed)
         }
+        return placed
     }
 
-    private fun findFlattestWithinSlot(terrain: HeightMap, center: Int, slotLo: Int, slotHi: Int): Int {
-        var bestX = center.coerceIn(slotLo, slotHi)
+    /**
+     * Uniform rejection sampling for an x that clears every already-placed tank by
+     * [MIN_GAP]. Falls back to whichever x in range is farthest from its nearest
+     * neighbor if the space is packed tight enough that random sampling can't find a
+     * clean spot within [MAX_SAMPLE_ATTEMPTS] - only reachable with an unusually narrow
+     * map or unusually large tank count, never in normal play.
+     */
+    private fun sampleCandidate(lo: Int, hi: Int, placed: List<Int>, rng: Random): Int {
+        repeat(MAX_SAMPLE_ATTEMPTS) {
+            val candidate = if (hi > lo) rng.nextInt(lo, hi + 1) else lo
+            if (placed.none { abs(it - candidate) < MIN_GAP }) return candidate
+        }
+        return (lo..hi).maxByOrNull { x -> placed.minOfOrNull { abs(it - x) } ?: Int.MAX_VALUE } ?: lo
+    }
+
+    /** Nudges [center] toward the flattest ground within [FLATTEN_WINDOW] of it, never
+     * moving to an x that's closer than [MIN_GAP] to any already-placed tank. */
+    private fun findFlattestNearby(terrain: HeightMap, center: Int, lo: Int, hi: Int, placed: List<Int>): Int {
+        var bestX = center
         var bestSlope = Int.MAX_VALUE
-        for (x in slotLo..slotHi) {
+        for (x in max(lo, center - FLATTEN_WINDOW)..min(hi, center + FLATTEN_WINDOW)) {
+            if (placed.any { abs(it - x) < MIN_GAP }) continue
             val left = terrain.heightAt(max(0, x - 1))
             val right = terrain.heightAt(min(terrain.width - 1, x + 1))
             val slope = abs(right - left)
