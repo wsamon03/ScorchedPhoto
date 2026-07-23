@@ -60,7 +60,7 @@ class GameLoopThread(
             val canvas = surfaceHolder.lockCanvas()
             if (canvas != null) {
                 try {
-                    renderer.draw(canvas, engine.terrain, engine.tanks, engine.projectiles, engine.impactEffects)
+                    renderer.draw(canvas, engine.terrain, engine.tanks, engine.projectiles, engine.impactEffects, engine.currentTank?.id)
                 } finally {
                     surfaceHolder.unlockCanvasAndPost(canvas)
                 }

@@ -48,12 +48,21 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
 
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
+    // Tracks how long the current tank's turn has been active, purely for the
+    // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
+    // whenever the id passed in as currentTankId changes, so it's independent of the
+    // engine's own tick cadence and keeps flashing even while the engine is paused on
+    // AIMING (during which GameLoopThread doesn't call engine.tick at all).
+    private var flashTankId: Int? = null
+    private var flashStartNanos: Long = 0L
+
     fun draw(
         canvas: Canvas,
         terrain: HeightMap,
         tanks: List<Tank>,
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
+        currentTankId: Int?,
     ) {
         canvas.drawColor(Color.BLACK)
         val transform = WorldTransform.fit(
@@ -86,13 +95,37 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
             )
         }
 
+        if (currentTankId != flashTankId) {
+            flashTankId = currentTankId
+            flashStartNanos = System.nanoTime()
+        }
+        val flashColor = currentTankId?.let { id ->
+            turnStartFlashColor(tanks.firstOrNull { it.id == id }, (System.nanoTime() - flashStartNanos) / 1_000_000_000f)
+        }
+
         for (tank in tanks) {
             if (!tank.alive && !tank.burning) continue
-            drawTank(canvas, tank, terrain, transform)
+            val colorOverride = if (tank.id == currentTankId) flashColor else null
+            drawTank(canvas, tank, terrain, transform, colorOverride)
             if (tank.burning) {
                 drawBurningTank(canvas, tank, transform)
             }
         }
+    }
+
+    /**
+     * The current tank's body color while its start-of-turn flash is still playing:
+     * alternates white/normal (or magenta/normal if the tank's own color is already
+     * white) starting on a flash, [TURN_FLASH_COUNT] flashes total, each flash and each
+     * intervening normal-color gap lasting [TURN_FLASH_SEGMENT_SECONDS] - null once the
+     * flash sequence has finished (or there's no current tank), meaning "draw normally".
+     */
+    private fun turnStartFlashColor(tank: Tank?, elapsedSeconds: Float): Int? {
+        if (tank == null || elapsedSeconds >= TURN_FLASH_TOTAL_SECONDS) return null
+        val segmentIndex = (elapsedSeconds / TURN_FLASH_SEGMENT_SECONDS).toInt().coerceIn(0, TURN_FLASH_SEGMENTS - 1)
+        val isFlashSegment = segmentIndex % 2 == 0
+        if (!isFlashSegment) return null
+        return if (tank.color == Color.WHITE) Color.MAGENTA else Color.WHITE
     }
 
     private fun drawCraterScars(canvas: Canvas, terrain: HeightMap, transform: WorldTransform) {
@@ -195,7 +228,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         }
     }
 
-    private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, transform: WorldTransform) {
+    private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, transform: WorldTransform, colorOverride: Int? = null) {
         val cx = transform.screenX(tank.x)
         val cy = transform.screenY(tank.y)
         val halfWidth = TANK_HALF_WIDTH * transform.scale
@@ -211,7 +244,7 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
             atan2(riseTerrain.toDouble(), (2 * SLOPE_SAMPLE_OFFSET).toDouble()),
         ).toFloat()
 
-        tankBodyPaint.color = tank.color
+        tankBodyPaint.color = colorOverride ?: tank.color
         canvas.save()
         canvas.rotate(slopeDeg, cx, cy)
         canvas.drawPath(tankBodyPath(tank.shape, cx, cy, halfWidth), tankBodyPaint)
@@ -271,5 +304,12 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         private const val HOLD_SECONDS = 0.25f
         private const val FADE_SECONDS = 0.25f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = GROWTH_SECONDS + HOLD_SECONDS + FADE_SECONDS
+
+        // Start-of-turn color flash: 4 white (or magenta, for an already-white tank)
+        // flashes, each lasting 0.1s, separated by 0.1s back at the normal color.
+        private const val TURN_FLASH_SEGMENT_SECONDS = 0.1f
+        private const val TURN_FLASH_COUNT = 4
+        private const val TURN_FLASH_SEGMENTS = TURN_FLASH_COUNT * 2
+        private const val TURN_FLASH_TOTAL_SECONDS = TURN_FLASH_SEGMENT_SECONDS * TURN_FLASH_SEGMENTS
     }
 }
