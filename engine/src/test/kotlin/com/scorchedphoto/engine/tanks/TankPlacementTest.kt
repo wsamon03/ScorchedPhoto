@@ -12,13 +12,14 @@ class TankPlacementTest {
 
     @Test
     fun `positions are strictly increasing and never overlap`() {
+        val minGap = (2 * Tank.RADIUS).toInt()
         repeat(50) { seed ->
             val terrain = flatTerrain(width = 500)
             val positions = TankPlacement.placeX(terrain, count = 6, rng = Random(seed.toLong()))
             for (i in 1 until positions.size) {
                 assertTrue(
-                    "seed=$seed positions not increasing: $positions",
-                    positions[i] > positions[i - 1],
+                    "seed=$seed tanks overlap (need >= $minGap apart): $positions",
+                    positions[i] - positions[i - 1] >= minGap,
                 )
             }
         }
