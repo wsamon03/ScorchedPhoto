@@ -1,6 +1,8 @@
 package com.scorchedphoto.app.game
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -25,7 +27,7 @@ import kotlin.math.sin
  * through a single [WorldTransform.fit] (see its doc for why: independent x/y scale
  * factors distort launch angles and motion).
  */
-class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntArray) {
+class GameRenderer(private val context: Context, private val photo: Bitmap?, private val originalGroundY: IntArray) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val craterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -45,8 +47,32 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
+    private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+    private val speechBubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+    private val speechBubbleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
+    private val speechBubbleTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.BLACK
+        textSize = 24f
+        textAlign = Paint.Align.CENTER
+    }
 
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
+
+    // Decoded once and reused every frame - see assets/fire/, extracted from the source
+    // GIF (48 frames @ 80ms) down to every other frame @ 160ms, same total loop length.
+    private val fireFrames: List<Bitmap> by lazy {
+        (0 until FIRE_FRAME_COUNT).map { i ->
+            context.assets.open("fire/frame_%02d.png".format(i)).use { BitmapFactory.decodeStream(it) }
+        }
+    }
+
+    // A tank's taunt is picked once, the first time it's drawn burning, and kept for the
+    // whole burn rather than re-rolled every frame - see burnMessageFor.
+    private val burnMessages = mutableMapOf<Int, String>()
 
     // Tracks how long the current tank's turn has been active, purely for the
     // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
@@ -262,13 +288,60 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
     }
 
     private fun drawBurningTank(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        if (fireFrames.isEmpty()) return
+        val frameIndex = ((tank.burningElapsed * 1000).toLong() / FIRE_FRAME_DURATION_MS % fireFrames.size).toInt()
+        val frame = fireFrames[frameIndex]
+
         val cx = transform.screenX(tank.x)
         val cy = transform.screenY(tank.y)
-        val burnRadius = (TANK_HALF_WIDTH + 2f) * transform.scale
-        val burningPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(200, 255, 100, 0)
+        val flameHeight = FIRE_DISPLAY_HEIGHT * transform.scale
+        val flameWidth = flameHeight * frame.width / frame.height
+        // Bottom edge sits slightly into the tank body so the flame reads as rising off
+        // it rather than floating just above.
+        val flameBottom = cy + TANK_HALF_WIDTH * 0.3f * transform.scale
+        val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
+        canvas.drawBitmap(frame, null, dst, fireFramePaint)
+
+        drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank))
+    }
+
+    /** The taunt a burning tank is showing - assigned once (the first time this tank is
+     * drawn burning) and held for the rest of its burn, since only actively-burning tanks
+     * ever reach this call. A tank dies at most once per match, so the entry is simply
+     * left behind afterward - harmless, and gone once this renderer's match ends. */
+    private fun burnMessageFor(tank: Tank): String = burnMessages.getOrPut(tank.id) { BURN_MESSAGES.random() }
+
+    private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
+        val fm = speechBubbleTextPaint.fontMetrics
+        val textHeight = fm.descent - fm.ascent
+        val boxWidth = speechBubbleTextPaint.measureText(message) + BUBBLE_PADDING_X * 2f
+        val boxHeight = textHeight + BUBBLE_PADDING_Y * 2f
+        val boxBottom = tailTipY - BUBBLE_TAIL_HEIGHT
+        val boxTop = boxBottom - boxHeight
+        val rect = RectF(cx - boxWidth / 2f, boxTop, cx + boxWidth / 2f, boxBottom)
+
+        val bubblePath = Path().apply { addRoundRect(rect, BUBBLE_CORNER_RADIUS, BUBBLE_CORNER_RADIUS, Path.Direction.CW) }
+        val tailFill = Path().apply {
+            moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+            lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+            lineTo(cx, tailTipY)
+            close()
         }
-        canvas.drawCircle(cx, cy, burnRadius, burningPaint)
+        // Open path (no closing top edge) so the tail's outline doesn't draw a stray
+        // line across the bubble's own bottom border where the two shapes meet.
+        val tailOutline = Path().apply {
+            moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+            lineTo(cx, tailTipY)
+            lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+        }
+
+        canvas.drawPath(tailFill, speechBubblePaint)
+        canvas.drawPath(bubblePath, speechBubblePaint)
+        canvas.drawPath(bubblePath, speechBubbleBorderPaint)
+        canvas.drawPath(tailOutline, speechBubbleBorderPaint)
+
+        val baselineY = (boxTop + boxBottom) / 2f - (fm.ascent + fm.descent) / 2f
+        canvas.drawText(message, cx, baselineY, speechBubbleTextPaint)
     }
 
     /** Builds [shape]'s normalized outline (see [TankShape]) into a screen-space [Path]. */
@@ -311,5 +384,24 @@ class GameRenderer(private val photo: Bitmap?, private val originalGroundY: IntA
         private const val TURN_FLASH_COUNT = 4
         private const val TURN_FLASH_SEGMENTS = TURN_FLASH_COUNT * 2
         private const val TURN_FLASH_TOTAL_SECONDS = TURN_FLASH_SEGMENT_SECONDS * TURN_FLASH_SEGMENTS
+
+        // assets/fire/frame_00.png..frame_23.png: every other frame of the source 48-frame
+        // @80ms GIF, so 24 frames @160ms reproduces the same ~3.84s loop.
+        private const val FIRE_FRAME_COUNT = 24
+        private const val FIRE_FRAME_DURATION_MS = 160L
+        private const val FIRE_DISPLAY_HEIGHT = TANK_HALF_WIDTH * 4f
+
+        private val BURN_MESSAGES = listOf(
+            "Not again!",
+            "#\$@!",
+            "Ouch! That hurts!",
+            "I'll get you next time!",
+            "Why me?",
+        )
+        private const val BUBBLE_PADDING_X = 12f
+        private const val BUBBLE_PADDING_Y = 8f
+        private const val BUBBLE_CORNER_RADIUS = 10f
+        private const val BUBBLE_TAIL_WIDTH = 14f
+        private const val BUBBLE_TAIL_HEIGHT = 10f
     }
 }

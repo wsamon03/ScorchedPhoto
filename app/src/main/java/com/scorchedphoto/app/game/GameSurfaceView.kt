@@ -22,7 +22,7 @@ class GameSurfaceView(
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
     private val originalGroundY = engine.terrain.groundY.copyOf()
-    private val renderer = GameRenderer(photo, originalGroundY)
+    private val renderer = GameRenderer(context, photo, originalGroundY)
     private var loopThread: GameLoopThread? = null
 
     init {
