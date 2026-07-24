@@ -23,6 +23,9 @@ private const val MAX_TANKS = 6
 private const val PITCH_RATE_MIN = 0.5f
 private const val PITCH_RATE_MAX = 2.0f
 
+// kotlin.random.Random has no ranged nextFloat() overload (only nextDouble/nextInt do).
+private fun Random.nextFloat(from: Float, until: Float): Float = from + nextFloat() * (until - from)
+
 @HiltViewModel
 class GameSetupViewModel @Inject constructor(
     private val matchConfigRepository: MatchConfigRepository,
