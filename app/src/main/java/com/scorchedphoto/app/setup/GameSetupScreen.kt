@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +35,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +50,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.scorchedphoto.app.tts.CustomVoice
 import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.app.ui.LockScreenOrientation
 import com.scorchedphoto.engine.ai.Difficulty
@@ -61,6 +64,7 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     val tankConfigs by viewModel.tankConfigs.collectAsStateWithLifecycle()
     val availableVoices by viewModel.availableVoices.collectAsStateWithLifecycle()
+    val customVoices by viewModel.customVoices.collectAsStateWithLifecycle()
     var showMoreVoicesDialog by remember { mutableStateOf(false) }
 
     Scaffold { padding ->
@@ -108,6 +112,7 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
                     TankConfigRow(
                         config = config,
                         availableVoices = availableVoices,
+                        customVoices = customVoices,
                         onToggleCpu = { viewModel.toggleCpu(index) },
                         onDifficultyChange = { viewModel.setDifficulty(index, it) },
                         onShapeChange = { viewModel.setShape(index, it) },
@@ -115,6 +120,8 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
                         onPitchChange = { viewModel.setPitch(index, it) },
                         onSpeechRateChange = { viewModel.setSpeechRate(index, it) },
                         onTest = { viewModel.testVoice(index) },
+                        onLoadCustomVoice = { viewModel.applyCustomVoice(index, it) },
+                        onSaveCustomVoice = { name -> viewModel.saveCustomVoice(index, name) },
                     )
                 }
             }
@@ -202,6 +209,7 @@ private fun WantMoreVoicesDialog(onDismiss: () -> Unit) {
 private fun TankConfigRow(
     config: TankConfig,
     availableVoices: List<VoiceOption>,
+    customVoices: List<CustomVoice>,
     onToggleCpu: () -> Unit,
     onDifficultyChange: (Difficulty) -> Unit,
     onShapeChange: (TankShape) -> Unit,
@@ -209,7 +217,10 @@ private fun TankConfigRow(
     onPitchChange: (Float) -> Unit,
     onSpeechRateChange: (Float) -> Unit,
     onTest: () -> Unit,
+    onLoadCustomVoice: (CustomVoice) -> Unit,
+    onSaveCustomVoice: (String) -> Unit,
 ) {
+    var showSaveDialog by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -238,15 +249,30 @@ private fun TankConfigRow(
             onSelect = onShapeChange,
             modifier = Modifier.padding(top = 6.dp),
         )
-        Column(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             VoiceDropdown(selected = config.voiceId, options = availableVoices, onSelect = onVoiceChange)
-            Button(onClick = onTest, modifier = Modifier.padding(top = 4.dp)) {
+            Button(onClick = onTest) {
                 Text("Test")
             }
+            CustomVoiceDropdown(customVoices = customVoices, onSelect = onLoadCustomVoice)
+            Button(onClick = { showSaveDialog = true }) {
+                Text("Save Voice")
+            }
+        }
+        if (showSaveDialog) {
+            SaveCustomVoiceDialog(
+                onConfirm = { name ->
+                    onSaveCustomVoice(name)
+                    showSaveDialog = false
+                },
+                onDismiss = { showSaveDialog = false },
+            )
         }
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Pitch", modifier = Modifier.padding(end = 4.dp))
@@ -289,6 +315,54 @@ private fun VoiceDropdown(selected: String?, options: List<VoiceOption>, onSelec
             }
         }
     }
+}
+
+@Composable
+private fun CustomVoiceDropdown(customVoices: List<CustomVoice>, onSelect: (CustomVoice) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Button(onClick = { expanded = true }, enabled = customVoices.isNotEmpty()) {
+            Text("Load Voice")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            customVoices.forEach { customVoice ->
+                DropdownMenuItem(
+                    text = { Text(customVoice.name) },
+                    onClick = {
+                        onSelect(customVoice)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SaveCustomVoiceDialog(onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save Voice") },
+        text = {
+            TextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Name") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

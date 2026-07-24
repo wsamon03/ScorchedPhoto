@@ -1,14 +1,20 @@
 package com.scorchedphoto.app.setup
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.scorchedphoto.app.tts.CustomVoice
+import com.scorchedphoto.app.tts.CustomVoiceRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
 import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.random.Random
 
@@ -21,6 +27,7 @@ private const val PITCH_RATE_MAX = 2.0f
 class GameSetupViewModel @Inject constructor(
     private val matchConfigRepository: MatchConfigRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
+    private val customVoiceRepository: CustomVoiceRepository,
 ) : ViewModel() {
 
     private val _tankConfigs = MutableStateFlow(defaultConfigs(MIN_TANKS))
@@ -29,6 +36,10 @@ class GameSetupViewModel @Inject constructor(
     /** Real voices this device's TTS engine has, for the setup screen's voice picker -
      * starts as just [VoiceOption.SYSTEM_DEFAULT] and fills in once enumeration completes. */
     val availableVoices: StateFlow<List<VoiceOption>> = deathLineSpeaker.availableVoices
+
+    /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
+    val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val canAddTank: Boolean get() = _tankConfigs.value.size < MAX_TANKS
     val canRemoveTank: Boolean get() = _tankConfigs.value.size > MIN_TANKS
@@ -81,6 +92,19 @@ class GameSetupViewModel @Inject constructor(
 
     fun setSpeechRate(index: Int, speechRate: Float) {
         updateAt(index) { it.copy(speechRate = speechRate) }
+    }
+
+    fun applyCustomVoice(index: Int, customVoice: CustomVoice) {
+        updateAt(index) {
+            it.copy(voiceId = customVoice.voiceId, pitch = customVoice.pitch, speechRate = customVoice.speechRate)
+        }
+    }
+
+    fun saveCustomVoice(index: Int, name: String) {
+        val config = _tankConfigs.value.getOrNull(index) ?: return
+        viewModelScope.launch {
+            customVoiceRepository.save(name, config.voiceId, config.pitch, config.speechRate)
+        }
     }
 
     /** Speaks the tank's current voice/pitch/rate combo, naming the voice so the effect
