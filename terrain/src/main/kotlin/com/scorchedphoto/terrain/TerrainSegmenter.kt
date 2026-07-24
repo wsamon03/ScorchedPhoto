@@ -35,33 +35,28 @@ object TerrainSegmenter {
 
     private const val TRANSITION_WINDOW = 4
 
-    private const val COST_EDGE_WEIGHT = 0.5f
-    private const val COST_TRANSITION_WEIGHT = 0.5f
-
-    private const val MAX_ROW_JUMP_FRACTION = 0.04f
     private const val MIN_ROW_JUMP = 3
-    private const val STEP_PENALTY_WEIGHT = 0.02f
 
     private const val ALL_SKY_MEAN_LIKELIHOOD_THRESHOLD = 0.85f
     private const val ALL_SKY_MEAN_TRANSITION_THRESHOLD = 0.15f
 
-    private const val MEDIAN_WINDOW = 3
     private const val MIN_SKY_HEADROOM_FRACTION = 0.08f
 
     fun segment(
         buffer: PixelBuffer,
         seed: Long = 0L,
         skySignalProvider: SkySignalProvider = ClassicalSkySignalProvider,
+        style: TerrainSegmentationStyle = TerrainSegmentationStyle(),
     ): HeightMap {
         val analysis = boxDownscale(buffer, ANALYSIS_LONG_EDGE)
         val edges = sobelEdgeMagnitude(analysis)
 
         val skyLikelihood = skySignalProvider.skyLikelihood(analysis)
         val transition = transitionScoreMap(skyLikelihood, analysis.width, analysis.height)
-        val cost = buildCostMap(edges, transition, analysis.width, analysis.height)
+        val cost = buildCostMap(edges, transition, analysis.width, analysis.height, style)
 
-        val maxJump = max(MIN_ROW_JUMP, (analysis.height * MAX_ROW_JUMP_FRACTION).roundToInt())
-        val rawPath = findMinCostPath(cost, analysis.width, analysis.height, maxJump)
+        val maxJump = max(MIN_ROW_JUMP, (analysis.height * style.maxRowJumpFraction).roundToInt())
+        val rawPath = findMinCostPath(cost, analysis.width, analysis.height, maxJump, style.stepPenaltyWeight)
 
         val corrected = if (isDegenerateAllSky(skyLikelihood, transition, rawPath, analysis.width, analysis.height)) {
             FallbackTerrainGenerator.generateProcedural(analysis.width, analysis.height, seed)
@@ -69,7 +64,7 @@ object TerrainSegmenter {
             rawPath
         }
 
-        val smoothed = smooth(corrected, analysis.width, analysis.height)
+        val smoothed = smooth(corrected, analysis.width, analysis.height, style.medianWindow)
         val groundY = upscaleBoundary(smoothed, analysis.width, analysis.height, buffer.width, buffer.height)
 
         return HeightMap(buffer.width, buffer.height, groundY)
@@ -156,10 +151,16 @@ object TerrainSegmenter {
         }
     }
 
-    private fun buildCostMap(edges: Array<FloatArray>, transition: Array<FloatArray>, width: Int, height: Int): Array<FloatArray> {
+    private fun buildCostMap(
+        edges: Array<FloatArray>,
+        transition: Array<FloatArray>,
+        width: Int,
+        height: Int,
+        style: TerrainSegmentationStyle,
+    ): Array<FloatArray> {
         return Array(height) { y ->
             FloatArray(width) { x ->
-                COST_EDGE_WEIGHT * (1f - edges[y][x]) + COST_TRANSITION_WEIGHT * (1f - transition[y][x])
+                style.costEdgeWeight * (1f - edges[y][x]) + style.costTransitionWeight * (1f - transition[y][x])
             }
         }
     }
@@ -171,7 +172,7 @@ object TerrainSegmenter {
      * it). This is what makes the boundary globally coherent by construction instead of
      * independent per-column guesses patched together afterward.
      */
-    private fun findMinCostPath(cost: Array<FloatArray>, width: Int, height: Int, maxJump: Int): IntArray {
+    private fun findMinCostPath(cost: Array<FloatArray>, width: Int, height: Int, maxJump: Int, stepPenaltyWeight: Float): IntArray {
         // dp/back are indexed [x][y] (column-major, matching the left-to-right DP sweep);
         // cost/edges/transition are indexed [y][x] (row-major, matching how they're built
         // as Array(height) { FloatArray(width) }) - every cost-map access below must flip
@@ -187,7 +188,7 @@ object TerrainSegmenter {
                 for (dy in -maxJump..maxJump) {
                     val py = y + dy
                     if (py < 0 || py >= height) continue
-                    val candidate = dp[x - 1][py] + STEP_PENALTY_WEIGHT * abs(dy)
+                    val candidate = dp[x - 1][py] + stepPenaltyWeight * abs(dy)
                     if (candidate < bestPrev) {
                         bestPrev = candidate
                         bestPy = py
@@ -238,8 +239,8 @@ object TerrainSegmenter {
             meanTransitionAlongPath < ALL_SKY_MEAN_TRANSITION_THRESHOLD
     }
 
-    private fun smooth(boundary: IntArray, width: Int, height: Int): IntArray {
-        val median = medianFilter(boundary, MEDIAN_WINDOW)
+    private fun smooth(boundary: IntArray, width: Int, height: Int, medianWindow: Int): IntArray {
+        val median = medianFilter(boundary, medianWindow)
         val minAllowedY = (height * MIN_SKY_HEADROOM_FRACTION).roundToInt()
         return IntArray(width) { median[it].coerceIn(minAllowedY, height - 1) }
     }

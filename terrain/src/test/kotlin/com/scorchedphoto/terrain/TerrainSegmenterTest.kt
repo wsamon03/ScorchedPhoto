@@ -5,6 +5,7 @@ import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.random.Random
 
 class TerrainSegmenterTest {
 
@@ -216,5 +217,48 @@ class TerrainSegmenterTest {
             "expected the two providers to produce clearly different average groundY",
             highMap.groundY.average() - lowMap.groundY.average() > 50,
         )
+    }
+
+    @Test
+    fun `different seeds produce different boundaries on the same non-degenerate photo`() {
+        val width = 200
+        val height = 200
+        // Must be a non-flat boundary: on a sharp, flat transition the transition-score
+        // signal spikes so hard the DP latches onto the true boundary regardless of
+        // style, so a flat fixture can't actually demonstrate regenerate does anything.
+        // The sine wave's peaks/troughs are where a randomized medianWindow (one of the
+        // varied knobs) measurably shifts the result.
+        val (buffer, _) = slopedHorizonBuffer(width, height, baseY = 100, amplitude = 30, cycles = 2.0)
+
+        val distinct = (0L until 8L).map { seed ->
+            TerrainSegmenter.segment(buffer, style = TerrainSegmentationStyle.random(Random(seed)))
+                .groundY.toList()
+        }.toSet()
+
+        assertTrue(
+            "regenerate must vary the boundary; got ${distinct.size} distinct result(s) across 8 seeds",
+            distinct.size > 1,
+        )
+    }
+
+    @Test
+    fun `randomized styles keep adjacent-column deltas bounded`() {
+        val width = 200
+        val height = 200
+        val fixtures = listOf(
+            slopedHorizonBuffer(width, height, baseY = 100, amplitude = 30, cycles = 2.0).first,
+            texturedGroundHorizonBuffer(width, height, skyRows = 80, noiseSeed = 7L),
+            brightGroundHorizonBuffer(width, height, skyRows = 80),
+        )
+        for (seed in 0L until 8L) {
+            val style = TerrainSegmentationStyle.random(Random(seed))
+            for (buffer in fixtures) {
+                val map = TerrainSegmenter.segment(buffer, style = style)
+                for (x in 1 until width) {
+                    val delta = abs(map.groundY[x] - map.groundY[x - 1])
+                    assertTrue("seed $seed: large jump at column $x: $delta", delta < 15)
+                }
+            }
+        }
     }
 }
