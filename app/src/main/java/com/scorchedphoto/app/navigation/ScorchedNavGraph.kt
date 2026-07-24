@@ -16,19 +16,19 @@ import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
 fun ScorchedNavGraph(navController: NavHostController = rememberNavController()) {
     NavHost(navController = navController, startDestination = Screen.Home.route) {
         composable(Screen.Home.route) {
-            HomeScreen(onNewGame = { navController.navigate(Screen.PhotoSource.route) })
+            HomeScreen(onNewGame = { navController.navigate(Screen.GameSetup.route) })
+        }
+        composable(Screen.GameSetup.route) {
+            GameSetupScreen(onStartMatch = { navController.navigate(Screen.PhotoSource.route) })
         }
         composable(Screen.PhotoSource.route) {
             PhotoSourceScreen(onPhotoReady = { navController.navigate(Screen.TerrainPreview.route) })
         }
         composable(Screen.TerrainPreview.route) {
             TerrainPreviewScreen(
-                onAccept = { navController.navigate(Screen.GameSetup.route) },
+                onAccept = { navController.navigate(Screen.Game.route) },
                 onRetake = { navController.popBackStack() },
             )
-        }
-        composable(Screen.GameSetup.route) {
-            GameSetupScreen(onStartMatch = { navController.navigate(Screen.Game.route) })
         }
         composable(Screen.Game.route) {
             GameScreen(onMatchOver = { navController.navigate(Screen.Victory.route) })

@@ -1,5 +1,6 @@
 package com.scorchedphoto.app.result
 
+import android.content.pm.ActivityInfo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.scorchedphoto.app.ui.LockScreenOrientation
 
 @Composable
 fun VictoryScreen(
@@ -22,6 +24,7 @@ fun VictoryScreen(
     onHome: () -> Unit,
     viewModel: VictoryViewModel = hiltViewModel(),
 ) {
+    LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
     Scaffold { padding ->
         Column(
             modifier = Modifier

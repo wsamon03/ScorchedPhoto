@@ -1,5 +1,6 @@
 package com.scorchedphoto.app.game
 
+import android.content.pm.ActivityInfo
 import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,10 +20,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scorchedphoto.app.game.hud.HudOverlay
 import com.scorchedphoto.app.game.turntransition.PassDeviceScreen
+import com.scorchedphoto.app.ui.LockScreenOrientation
 import com.scorchedphoto.engine.MatchPhase
 
 @Composable
 fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel()) {
+    LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val view = LocalView.current
 

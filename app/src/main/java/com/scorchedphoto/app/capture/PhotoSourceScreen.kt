@@ -1,6 +1,7 @@
 package com.scorchedphoto.app.capture
 
 import android.Manifest
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -25,9 +26,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.scorchedphoto.app.ui.LockScreenOrientation
 
 @Composable
 fun PhotoSourceScreen(onPhotoReady: () -> Unit, viewModel: PhotoSourceViewModel = hiltViewModel()) {
+    LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     val context = LocalContext.current
     var showCamera by remember { mutableStateOf(false) }
     var cameraPermissionDenied by remember { mutableStateOf(false) }

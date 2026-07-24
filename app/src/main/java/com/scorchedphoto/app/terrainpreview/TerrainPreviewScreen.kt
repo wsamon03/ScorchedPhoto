@@ -1,5 +1,6 @@
 package com.scorchedphoto.app.terrainpreview
 
+import android.content.pm.ActivityInfo
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.scorchedphoto.app.ui.LockScreenOrientation
 import kotlin.math.roundToInt
 
 @Composable
@@ -31,6 +33,7 @@ fun TerrainPreviewScreen(
     onRetake: () -> Unit,
     viewModel: TerrainPreviewViewModel = hiltViewModel(),
 ) {
+    LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold { padding ->

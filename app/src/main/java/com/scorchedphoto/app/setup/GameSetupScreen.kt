@@ -2,6 +2,7 @@ package com.scorchedphoto.app.setup
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.Canvas
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scorchedphoto.app.tts.VoiceOption
+import com.scorchedphoto.app.ui.LockScreenOrientation
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 
@@ -56,6 +58,7 @@ private val PITCH_RATE_RANGE = 0.5f..2.0f
 
 @Composable
 fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hiltViewModel()) {
+    LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     val tankConfigs by viewModel.tankConfigs.collectAsStateWithLifecycle()
     val availableVoices by viewModel.availableVoices.collectAsStateWithLifecycle()
     var showMoreVoicesDialog by remember { mutableStateOf(false) }
@@ -125,7 +128,7 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
                     .fillMaxWidth()
                     .padding(top = 12.dp),
             ) {
-                Text("Start Match")
+                Text("Next")
             }
         }
     }
