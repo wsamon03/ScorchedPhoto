@@ -10,14 +10,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
+import kotlin.random.Random
 
 private const val MIN_TANKS = 2
 private const val MAX_TANKS = 6
-
-// Gives each tank some out-of-the-box voice distinction even before real per-device
-// voices have finished enumerating (see DeathLineSpeaker.availableVoices) or the user has
-// touched anything - purely a synchronous default, not a claim about any specific voice.
-private val DEFAULT_PITCHES = listOf(1.0f, 1.2f, 0.8f, 1.35f, 0.65f, 1.5f)
+private const val PITCH_RATE_MIN = 0.5f
+private const val PITCH_RATE_MAX = 2.0f
 
 @HiltViewModel
 class GameSetupViewModel @Inject constructor(
@@ -38,7 +36,11 @@ class GameSetupViewModel @Inject constructor(
     fun addTank() {
         if (!canAddTank) return
         val current = _tankConfigs.value
-        _tankConfigs.value = current + defaultConfigs(current.size + 1).last()
+        val newTank = defaultConfigs(current.size + 1).last()
+        _tankConfigs.value = current + newTank
+        if (newTank.isCpu) {
+            randomizeVoiceSettings(current.size)
+        }
     }
 
     fun removeTank() {
@@ -47,7 +49,18 @@ class GameSetupViewModel @Inject constructor(
     }
 
     fun toggleCpu(index: Int) {
-        updateAt(index) { it.copy(isCpu = !it.isCpu) }
+        updateAt(index) { config ->
+            val newConfig = config.copy(isCpu = !config.isCpu)
+            if (newConfig.isCpu) {
+                newConfig.copy(
+                    voiceId = pickRandomVoice(),
+                    pitch = Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX),
+                    speechRate = Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX),
+                )
+            } else {
+                newConfig
+            }
+        }
     }
 
     fun setDifficulty(index: Int, difficulty: Difficulty) {
@@ -89,13 +102,35 @@ class GameSetupViewModel @Inject constructor(
         }
     }
 
+    private fun pickRandomVoice(): String? {
+        val voices = availableVoices.value
+        return if (voices.size > 1) {
+            voices.drop(1).randomOrNull()?.id
+        } else {
+            null
+        }
+    }
+
+    private fun randomizeVoiceSettings(index: Int) {
+        updateAt(index) { config ->
+            config.copy(
+                voiceId = pickRandomVoice(),
+                pitch = Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX),
+                speechRate = Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX),
+            )
+        }
+    }
+
     private fun defaultConfigs(count: Int): List<TankConfig> = (0 until count).map { i ->
+        val isCpuTank = i != 0
         TankConfig(
             name = "Tank ${i + 1}",
             color = TANK_COLOR_PALETTE[i % TANK_COLOR_PALETTE.size],
-            isCpu = i != 0, // first tank defaults to human, rest to CPU
+            isCpu = isCpuTank,
             shape = TankShape.entries[i % TankShape.entries.size],
-            pitch = DEFAULT_PITCHES[i % DEFAULT_PITCHES.size],
+            voiceId = if (isCpuTank) pickRandomVoice() else null,
+            pitch = if (isCpuTank) Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX) else 1.0f,
+            speechRate = if (isCpuTank) Random.nextFloat(PITCH_RATE_MIN, PITCH_RATE_MAX) else 1.0f,
         )
     }
 }
