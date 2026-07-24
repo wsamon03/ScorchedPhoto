@@ -238,14 +238,13 @@ private fun TankConfigRow(
             onSelect = onShapeChange,
             modifier = Modifier.padding(top = 6.dp),
         )
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             VoiceDropdown(selected = config.voiceId, options = availableVoices, onSelect = onVoiceChange)
-            Button(onClick = onTest, modifier = Modifier.padding(start = 8.dp)) {
+            Button(onClick = onTest, modifier = Modifier.padding(top = 4.dp)) {
                 Text("Test")
             }
         }
