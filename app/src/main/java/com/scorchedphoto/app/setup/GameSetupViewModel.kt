@@ -33,12 +33,15 @@ class GameSetupViewModel @Inject constructor(
     private val customVoiceRepository: CustomVoiceRepository,
 ) : ViewModel() {
 
+    /** Real voices this device's TTS engine has, for the setup screen's voice picker -
+     * starts as just [VoiceOption.SYSTEM_DEFAULT] and fills in once enumeration completes.
+     * Must be initialized before [_tankConfigs] below, since its initializer (via
+     * [defaultConfigs]/[pickRandomVoice]) reads this property - Kotlin runs property
+     * initializers in declaration order, so a later declaration would still be null here. */
+    val availableVoices: StateFlow<List<VoiceOption>> = deathLineSpeaker.availableVoices
+
     private val _tankConfigs = MutableStateFlow(defaultConfigs(MIN_TANKS))
     val tankConfigs: StateFlow<List<TankConfig>> = _tankConfigs.asStateFlow()
-
-    /** Real voices this device's TTS engine has, for the setup screen's voice picker -
-     * starts as just [VoiceOption.SYSTEM_DEFAULT] and fills in once enumeration completes. */
-    val availableVoices: StateFlow<List<VoiceOption>> = deathLineSpeaker.availableVoices
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
