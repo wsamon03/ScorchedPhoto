@@ -52,7 +52,7 @@ class GameRenderer(
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
-    private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true }
+    private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true; alpha = FIRE_ALPHA }
     private val speechBubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val speechBubbleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
@@ -299,12 +299,17 @@ class GameRenderer(
 
         val cx = transform.screenX(tank.x)
         val cy = transform.screenY(tank.y)
-        val flameHeight = FIRE_DISPLAY_HEIGHT * transform.scale
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        val tankTop = cy - halfWidth
+        val topHalfBottom = cy - halfWidth * 0.5f
+
+        // Sized to sit over the tank's top half (drawn after the tank body, at
+        // FIRE_ALPHA, so the tank stays visible underneath) rather than towering above
+        // the whole tank - a slight overshoot beyond that half keeps the flame licking up
+        // past the turret instead of looking clipped.
+        val flameHeight = (topHalfBottom - tankTop) * FIRE_HEIGHT_OVERSHOOT
         val flameWidth = flameHeight * frame.width / frame.height
-        // Bottom edge sits slightly into the tank body so the flame reads as rising off
-        // it rather than floating just above.
-        val flameBottom = cy + TANK_HALF_WIDTH * 0.3f * transform.scale
-        val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
+        val dst = RectF(cx - flameWidth / 2f, topHalfBottom - flameHeight, cx + flameWidth / 2f, topHalfBottom)
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
 
         drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank).displayText)
@@ -397,7 +402,8 @@ class GameRenderer(
         // @80ms GIF, so 24 frames @160ms reproduces the same ~3.84s loop.
         private const val FIRE_FRAME_COUNT = 24
         private const val FIRE_FRAME_DURATION_MS = 160L
-        private const val FIRE_DISPLAY_HEIGHT = TANK_HALF_WIDTH * 4f
+        private const val FIRE_HEIGHT_OVERSHOOT = 1.25f
+        private const val FIRE_ALPHA = (0.75f * 255).toInt()
 
         // spokenText differs from displayText only for the censored line: the bubble
         // still shows the symbols, but TTS reads a natural stand-in instead of literally

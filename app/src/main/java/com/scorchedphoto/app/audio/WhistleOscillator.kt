@@ -86,10 +86,7 @@ class WhistleOscillator {
                     currentAmplitude += (targetAmplitude - currentAmplitude) * AMPLITUDE_SMOOTHING
                     phase += 2.0 * PI * currentFrequency / SAMPLE_RATE_HZ
                     if (phase > 2.0 * PI) phase -= 2.0 * PI
-                    // A touch of second-harmonic content so it reads as an airy "whistle"
-                    // rather than a pure lab-tone sine.
-                    val wave = sin(phase) + 0.15 * sin(phase * 2.0)
-                    buffer[i] = (wave * currentAmplitude * Short.MAX_VALUE).toInt().toShort()
+                    buffer[i] = (sin(phase) * currentAmplitude * Short.MAX_VALUE).toInt().toShort()
                 }
                 track.write(buffer, 0, buffer.size)
             }
