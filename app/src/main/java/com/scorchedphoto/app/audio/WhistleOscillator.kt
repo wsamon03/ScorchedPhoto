@@ -101,8 +101,8 @@ class WhistleOscillator {
         private const val BUFFER_FRAMES = 512
         private const val THREAD_JOIN_TIMEOUT_MS = 200L
 
-        private const val MIN_FREQUENCY_HZ = 300f
-        private const val MAX_FREQUENCY_HZ = 1100f
+        private const val MIN_FREQUENCY_HZ = 1100f
+        private const val MAX_FREQUENCY_HZ = 2800f
         // Vertical-speed magnitude (engine units, see PhysicsStep.GRAVITY/POWER_SCALE)
         // beyond which pitch bottoms out - roughly a mid-power shot's launch speed.
         private const val MAX_SPEED_FOR_PITCH = 420f

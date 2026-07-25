@@ -221,7 +221,12 @@ class GameEngine(
 
     private fun applyTankGravity(dt: Float) {
         for (tank in tanks) {
-            if (!tank.alive) continue
+            // A tank that just died keeps falling until it actually lands - skipping
+            // gravity for it the instant it dies (like every other dead tank) would leave
+            // it frozen hovering wherever the killing blow found it, even when the blast
+            // that killed it also blew away the ground underneath - see startPendingBurns,
+            // which waits for tank.falling to clear before starting the death animation.
+            if (!tank.alive && !tank.pendingBurn) continue
             val surfaceY = terrain.heightAt(tank.x.toInt()).toFloat()
             if (tank.y < surfaceY - FALL_SETTLE_EPSILON) {
                 tank.falling = true
@@ -275,14 +280,15 @@ class GameEngine(
     /**
      * Tanks that died this resolution wait in [Tank.pendingBurn] rather than starting
      * their burn animation immediately - only once every projectile explosion (both
-     * still-flying projectiles and still-animating impact flashes) has fully finished do
-     * they actually start burning, so a death's fire animation never overlaps the blast
-     * that caused it.
+     * still-flying projectiles and still-animating impact flashes) has fully finished,
+     * and the tank has actually landed ([Tank.falling] clear - see [applyTankGravity]),
+     * do they actually start burning. That keeps a death's fire animation from overlapping
+     * either the blast that caused it or a still-playing fall.
      */
     private fun startPendingBurns() {
         if (activeProjectiles.isNotEmpty() || activeImpactEffects.isNotEmpty()) return
         for (tank in tanks) {
-            if (!tank.pendingBurn) continue
+            if (!tank.pendingBurn || tank.falling) continue
             tank.pendingBurn = false
             tank.burning = true
             tank.burningElapsed = 0f

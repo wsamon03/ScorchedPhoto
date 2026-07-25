@@ -8,6 +8,7 @@ import com.scorchedphoto.app.result.MatchResultRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
+import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
@@ -91,6 +92,7 @@ class GameViewModel @Inject constructor(
      * in that tank's own chosen voice/pitch/rate. Safe to call from any thread. */
     fun onBurnMessageAssigned(tankId: Int, spokenText: String) {
         val settings = voiceSettings.getOrElse(tankId) { TankVoiceSettings(null, 1f, 1f) }
+        if (settings.voiceId == VoiceOption.NONE.id) return
         deathLineSpeaker.speak(spokenText, settings.voiceId, settings.pitch, settings.speechRate)
     }
 

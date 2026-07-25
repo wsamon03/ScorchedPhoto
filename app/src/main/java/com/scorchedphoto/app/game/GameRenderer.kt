@@ -300,16 +300,16 @@ class GameRenderer(
         val cx = transform.screenX(tank.x)
         val cy = transform.screenY(tank.y)
         val halfWidth = TANK_HALF_WIDTH * transform.scale
-        val tankTop = cy - halfWidth
-        val topHalfBottom = cy - halfWidth * 0.5f
 
-        // Sized to sit over the tank's top half (drawn after the tank body, at
-        // FIRE_ALPHA, so the tank stays visible underneath) rather than towering above
-        // the whole tank - a slight overshoot beyond that half keeps the flame licking up
-        // past the turret instead of looking clipped.
-        val flameHeight = (topHalfBottom - tankTop) * FIRE_HEIGHT_OVERSHOOT
+        // Anchored low - just above the tank's base - so most of the flame overlaps the
+        // tank's own body (reading as fire coming out of the tank, not floating above
+        // it), sized well past the tank's own height so it's clearly visible licking up
+        // past the turret. Drawn after the tank body at FIRE_ALPHA so the tank itself
+        // stays visible through/around it rather than being hidden.
+        val flameBottom = cy - halfWidth * 0.2f
+        val flameHeight = halfWidth * FIRE_HEIGHT_MULTIPLIER
         val flameWidth = flameHeight * frame.width / frame.height
-        val dst = RectF(cx - flameWidth / 2f, topHalfBottom - flameHeight, cx + flameWidth / 2f, topHalfBottom)
+        val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
 
         drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank).displayText)
@@ -402,7 +402,7 @@ class GameRenderer(
         // @80ms GIF, so 24 frames @160ms reproduces the same ~3.84s loop.
         private const val FIRE_FRAME_COUNT = 24
         private const val FIRE_FRAME_DURATION_MS = 160L
-        private const val FIRE_HEIGHT_OVERSHOOT = 1.25f
+        private const val FIRE_HEIGHT_MULTIPLIER = 2.2f
         private const val FIRE_ALPHA = (0.75f * 255).toInt()
 
         // spokenText differs from displayText only for the censored line: the bubble

@@ -117,6 +117,7 @@ class GameSetupViewModel @Inject constructor(
      * of the current picks is unambiguous rather than a generic filler phrase. */
     fun testVoice(index: Int) {
         val config = _tankConfigs.value.getOrNull(index) ?: return
+        if (config.voiceId == VoiceOption.NONE.id) return
         val voiceName = availableVoices.value.firstOrNull { it.id == config.voiceId }?.displayName
             ?: VoiceOption.SYSTEM_DEFAULT.displayName
         deathLineSpeaker.speak("Hello, my name is $voiceName", config.voiceId, config.pitch, config.speechRate)

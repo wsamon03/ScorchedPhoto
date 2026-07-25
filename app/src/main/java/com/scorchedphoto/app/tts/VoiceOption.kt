@@ -11,5 +11,10 @@ package com.scorchedphoto.app.tts
 data class VoiceOption(val id: String?, val displayName: String) {
     companion object {
         val SYSTEM_DEFAULT = VoiceOption(id = null, displayName = "Default")
+
+        /** Selectable "no voice" choice: a tank set to this never has its death line
+         * spoken. Uses a sentinel id (rather than null, which already means
+         * [SYSTEM_DEFAULT]) so the two stay distinguishable through [TankConfig]. */
+        val NONE = VoiceOption(id = "__none__", displayName = "None")
     }
 }
