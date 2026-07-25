@@ -223,6 +223,7 @@ private fun TankConfigRow(
     onSaveCustomVoice: (String) -> Unit,
 ) {
     var showSaveDialog by remember { mutableStateOf(false) }
+    var showVoiceSettings by remember { mutableStateOf(false) }
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -251,48 +252,56 @@ private fun TankConfigRow(
             onSelect = onShapeChange,
             modifier = Modifier.padding(top = 6.dp),
         )
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+        Button(
+            onClick = { showVoiceSettings = !showVoiceSettings },
+            modifier = Modifier.padding(top = 6.dp),
         ) {
-            VoiceDropdown(selected = config.voiceId, options = availableVoices, onSelect = onVoiceChange)
-            Button(onClick = onTest) {
-                Text("Test")
+            Text("Voice")
+        }
+        if (showVoiceSettings) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                VoiceDropdown(selected = config.voiceId, options = availableVoices, onSelect = onVoiceChange)
+                Button(onClick = onTest) {
+                    Text("Test")
+                }
+                CustomVoiceDropdown(customVoices = customVoices, onSelect = onLoadCustomVoice)
+                Button(onClick = { showSaveDialog = true }) {
+                    Text("Save Voice")
+                }
             }
-            CustomVoiceDropdown(customVoices = customVoices, onSelect = onLoadCustomVoice)
-            Button(onClick = { showSaveDialog = true }) {
-                Text("Save Voice")
+            if (showSaveDialog) {
+                SaveCustomVoiceDialog(
+                    onConfirm = { name ->
+                        onSaveCustomVoice(name)
+                        showSaveDialog = false
+                    },
+                    onDismiss = { showSaveDialog = false },
+                )
             }
-        }
-        if (showSaveDialog) {
-            SaveCustomVoiceDialog(
-                onConfirm = { name ->
-                    onSaveCustomVoice(name)
-                    showSaveDialog = false
-                },
-                onDismiss = { showSaveDialog = false },
-            )
-        }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Pitch", modifier = Modifier.padding(end = 4.dp))
-            Slider(
-                value = config.pitch,
-                onValueChange = onPitchChange,
-                valueRange = PITCH_RATE_RANGE,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Rate", modifier = Modifier.padding(end = 4.dp))
-            Slider(
-                value = config.speechRate,
-                onValueChange = onSpeechRateChange,
-                valueRange = PITCH_RATE_RANGE,
-                modifier = Modifier.weight(1f),
-            )
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Pitch", modifier = Modifier.padding(end = 4.dp))
+                Slider(
+                    value = config.pitch,
+                    onValueChange = onPitchChange,
+                    valueRange = PITCH_RATE_RANGE,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Rate", modifier = Modifier.padding(end = 4.dp))
+                Slider(
+                    value = config.speechRate,
+                    onValueChange = onSpeechRateChange,
+                    valueRange = PITCH_RATE_RANGE,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
