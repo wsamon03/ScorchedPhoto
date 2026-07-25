@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import com.scorchedphoto.app.audio.GameSoundController
 import com.scorchedphoto.engine.GameEngine
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -20,6 +21,7 @@ class GameSurfaceView(
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
     onBurnMessageAssigned: (Int, String) -> Unit,
+    private val soundController: GameSoundController,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
     private val originalGroundY = engine.terrain.groundY.copyOf()
@@ -31,7 +33,7 @@ class GameSurfaceView(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged)
+        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged, soundController)
         thread.running = true
         thread.start()
         loopThread = thread

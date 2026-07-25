@@ -2,6 +2,7 @@ package com.scorchedphoto.app.game
 
 import android.graphics.Bitmap
 import androidx.lifecycle.ViewModel
+import com.scorchedphoto.app.audio.GameSoundController
 import com.scorchedphoto.app.capture.PhotoRepository
 import com.scorchedphoto.app.result.MatchResultRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
@@ -29,6 +30,7 @@ class GameViewModel @Inject constructor(
     photoRepository: PhotoRepository,
     private val matchResultRepository: MatchResultRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
+    val soundController: GameSoundController,
 ) : ViewModel() {
 
     val engine: GameEngine

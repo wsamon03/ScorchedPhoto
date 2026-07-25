@@ -53,6 +53,7 @@ fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel
                     commandQueue = viewModel.commandQueue,
                     onStateChanged = viewModel::publishState,
                     onBurnMessageAssigned = viewModel::onBurnMessageAssigned,
+                    soundController = viewModel.soundController,
                 )
             },
             modifier = Modifier.fillMaxSize(),

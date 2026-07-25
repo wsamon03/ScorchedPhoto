@@ -1,7 +1,9 @@
 package com.scorchedphoto.app.game
 
 import android.view.SurfaceHolder
+import com.scorchedphoto.app.audio.GameSoundController
 import com.scorchedphoto.engine.GameEngine
+import com.scorchedphoto.engine.GameEvent
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.physics.normalizeAngleDeg
@@ -21,6 +23,7 @@ class GameLoopThread(
     private val renderer: GameRenderer,
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
+    private val soundController: GameSoundController,
 ) : Thread("GameLoopThread") {
 
     @Volatile
@@ -57,6 +60,8 @@ class GameLoopThread(
                 }
             }
 
+            updateSound()
+
             val canvas = surfaceHolder.lockCanvas()
             if (canvas != null) {
                 try {
@@ -76,6 +81,28 @@ class GameLoopThread(
                 }
             }
         }
+
+        // Leaving the screen mid-flight/mid-burn (e.g. a win ending the match) must not
+        // leave the whistle or a fire loop playing forever - both are driven purely by
+        // continuous per-frame state, so with no more frames coming they'd otherwise never
+        // hear the "stop" signal on their own.
+        soundController.updateWhistle(null)
+        soundController.updateBurningTanks(emptySet())
+    }
+
+    /** Forwards this frame's engine events to one-shot sounds, and drives the two
+     * continuous sounds (whistle, per-tank fire loop) off live engine state - see
+     * [GameSoundController]. */
+    private fun updateSound() {
+        for (event in engine.drainEvents()) {
+            when (event) {
+                GameEvent.ShotFired -> soundController.onShotFired()
+                GameEvent.Impact -> soundController.onExplosion()
+                is GameEvent.TankExploded -> soundController.onTankExploded()
+            }
+        }
+        soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
+        soundController.updateBurningTanks(engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id })
     }
 
     /** CPU turns aren't driven by [GameCommand]s - the loop thread already owns engine

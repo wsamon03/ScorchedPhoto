@@ -43,6 +43,7 @@ class GameEngine(
 
     private val activeProjectiles = mutableListOf<Projectile>()
     private val activeImpactEffects = mutableListOf<ImpactEffect>()
+    private val pendingEvents = mutableListOf<GameEvent>()
 
     var phase: MatchPhase = MatchPhase.AIMING
         private set
@@ -65,6 +66,16 @@ class GameEngine(
 
     fun ammoFor(tankId: Int, type: WeaponType): Int? = ammoRemaining[tankId]?.get(type)
 
+    /** Sound-relevant events produced since the last call - drained once per frame by
+     * [com.scorchedphoto.app.game.GameLoopThread] and forwarded to the sound controller,
+     * so audio triggers stay decoupled from wherever inside [tick] each change happens. */
+    fun drainEvents(): List<GameEvent> {
+        if (pendingEvents.isEmpty()) return emptyList()
+        val drained = pendingEvents.toList()
+        pendingEvents.clear()
+        return drained
+    }
+
     fun fire(): Boolean {
         val shooter = currentTank ?: return false
         if (phase != MatchPhase.AIMING) return false
@@ -82,6 +93,7 @@ class GameEngine(
         val (vx, vy) = launchVelocity(shooter.angleDeg, cappedPower)
         activeProjectiles += Projectile(shooter.x, shooter.y, vx, vy, weapon, shooter.id)
         phase = MatchPhase.FIRING
+        pendingEvents += GameEvent.ShotFired
         return true
     }
 
@@ -162,6 +174,7 @@ class GameEngine(
     private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
         CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
         activeImpactEffects += ImpactEffect(impactX, impactY, projectile.weapon.blastRadius)
+        pendingEvents += GameEvent.Impact
         for (tank in tanks) {
             if (!tank.alive) continue
             val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)
@@ -254,6 +267,7 @@ class GameEngine(
             if (tank.burningElapsed >= TANK_BURNING_DURATION_SECONDS) {
                 tank.burning = false
                 activeImpactEffects += ImpactEffect(tank.x, tank.y, Tank.RADIUS * 3f)
+                pendingEvents += GameEvent.TankExploded(tank.id)
             }
         }
     }
