@@ -6,7 +6,10 @@ import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.GameEvent
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.ai.CpuAimCalculator
+import com.scorchedphoto.engine.physics.launchVelocity
+import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.normalizeAngleDeg
+import com.scorchedphoto.engine.tanks.Tank
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
@@ -33,6 +36,14 @@ class GameLoopThread(
     private var cpuThinkingElapsed = 0f
     private var cpuThinkingForTankId: Int? = null
 
+    // Seconds since a fire was triggered (sound + whistle already playing) but before the
+    // projectile actually spawns/becomes visible - null when no shot is pending. See
+    // beginFire/advancePendingFire: the shot sound noticeably lagged the projectile's
+    // visual appearance (real device audio-pipeline latency), so instead of trying to
+    // shave that lag to zero, the visual is deliberately held back by FIRE_SOUND_LEAD_SECONDS
+    // so sound always and consistently leads it.
+    private var pendingFireElapsed: Float? = null
+
     override fun run() {
         var accumulator = 0f
         var lastNanos = System.nanoTime()
@@ -40,10 +51,12 @@ class GameLoopThread(
 
         while (running) {
             val frameStartNanos = System.nanoTime()
-            accumulator += (frameStartNanos - lastNanos) / 1_000_000_000f
+            val frameDeltaSeconds = (frameStartNanos - lastNanos) / 1_000_000_000f
+            accumulator += frameDeltaSeconds
             lastNanos = frameStartNanos
 
             drainAndApplyCommands()
+            advancePendingFire(frameDeltaSeconds)
 
             var ticked = false
             while (accumulator >= FIXED_DT) {
@@ -96,18 +109,52 @@ class GameLoopThread(
     private fun updateSound() {
         for (event in engine.drainEvents()) {
             when (event) {
-                GameEvent.ShotFired -> soundController.onShotFired()
+                // Already played eagerly in beginFire(), ahead of the projectile actually
+                // existing - see pendingFireElapsed doc.
+                GameEvent.ShotFired -> Unit
                 GameEvent.Impact -> soundController.onExplosion()
                 is GameEvent.TankExploded -> soundController.onTankExploded()
             }
         }
-        soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
+        // While a fire is pending, beginFire() already set the whistle's target pitch for
+        // the shot about to happen - this per-frame poll would otherwise immediately zero
+        // it back out every frame until the real projectile exists (projectiles is empty
+        // until engine.fire() actually runs).
+        if (pendingFireElapsed == null) {
+            soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
+        }
         soundController.updateBurningTanks(engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id })
+    }
+
+    /** Plays the shot sound and starts the whistle at this shot's actual launch pitch
+     * (mirroring the same capped-power -> launchVelocity math [GameEngine.fire] uses, so
+     * there's no audible pitch jump once the real projectile takes over next frame),
+     * then holds the projectile itself back for [FIRE_SOUND_LEAD_SECONDS] - see
+     * [pendingFireElapsed] doc for why. */
+    private fun beginFire() {
+        val shooter = engine.currentTank ?: return
+        val cappedPower = shooter.power.coerceAtMost(maxPowerForHealth(shooter.health, Tank.MAX_HEALTH))
+        val (_, vy) = launchVelocity(shooter.angleDeg, cappedPower)
+        soundController.onShotFired()
+        soundController.updateWhistle(vy)
+        pendingFireElapsed = 0f
+    }
+
+    private fun advancePendingFire(dt: Float) {
+        val elapsed = pendingFireElapsed ?: return
+        val newElapsed = elapsed + dt
+        if (newElapsed >= FIRE_SOUND_LEAD_SECONDS) {
+            pendingFireElapsed = null
+            engine.fire()
+        } else {
+            pendingFireElapsed = newElapsed
+        }
     }
 
     /** CPU turns aren't driven by [GameCommand]s - the loop thread already owns engine
      * mutation, so it can aim and fire directly once a short "thinking" delay elapses. */
     private fun maybeTakeCpuTurn(dt: Float) {
+        if (pendingFireElapsed != null) return // already mid-windup for this shot
         if (engine.phase != MatchPhase.AIMING) {
             cpuThinkingForTankId = null
             return
@@ -133,7 +180,7 @@ class GameLoopThread(
         val aim = CpuAimCalculator.computeAim(current, target, engine.terrain, engine.wind, current.difficulty, cpuRandom)
         current.angleDeg = aim.angleDeg
         current.power = aim.power
-        engine.fire()
+        beginFire()
         cpuThinkingForTankId = null
     }
 
@@ -144,8 +191,10 @@ class GameLoopThread(
                 is GameCommand.SetAngle -> engine.currentTank?.angleDeg = normalizeAngleDeg(command.angleDeg)
                 is GameCommand.SetWeapon -> engine.currentTank?.currentWeapon = command.weaponType
                 is GameCommand.FireWithPower -> {
-                    engine.currentTank?.power = command.power
-                    engine.fire()
+                    if (pendingFireElapsed == null) {
+                        engine.currentTank?.power = command.power
+                        beginFire()
+                    }
                 }
             }
         }
@@ -156,5 +205,6 @@ class GameLoopThread(
         private const val STATE_UPDATE_EVERY_N_FRAMES = 6
         private const val TARGET_FRAME_NANOS = 1_000_000_000L / 60L
         private const val CPU_THINKING_SECONDS = 1.2f
+        private const val FIRE_SOUND_LEAD_SECONDS = 0.25f
     }
 }

@@ -266,7 +266,7 @@ private fun TankConfigRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                VoiceDropdown(selected = config.voiceId, options = availableVoices + VoiceOption.NONE, onSelect = onVoiceChange)
+                VoiceDropdown(selected = config.voiceId, options = listOf(VoiceOption.NONE) + availableVoices, onSelect = onVoiceChange)
                 Button(onClick = onTest) {
                     Text("Test")
                 }
