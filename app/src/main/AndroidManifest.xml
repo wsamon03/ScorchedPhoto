@@ -36,15 +36,5 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Temporary debug tooling: shows crashes on screen with a copy/share button
-             instead of the system "App keeps stopping" dialog, for testing on a device
-             with no computer/adb access. Runs in its own process so it survives even if
-             the main process is being torn down by CrashHandler. -->
-        <activity
-            android:name=".crash.CrashActivity"
-            android:exported="false"
-            android:process=":crash"
-            android:theme="@style/Theme.ScorchedPhoto" />
     </application>
 </manifest>
