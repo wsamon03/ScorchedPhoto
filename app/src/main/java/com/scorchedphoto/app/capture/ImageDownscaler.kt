@@ -9,6 +9,7 @@ import androidx.exifinterface.media.ExifInterface
 import com.scorchedphoto.terrain.PixelBuffer
 import java.io.InputStream
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val WORKING_LONG_EDGE = 720
@@ -26,8 +27,9 @@ object ImageDownscaler {
 
         val orientation = readExifOrientation(context, uri)
         val corrected = applyExifOrientation(sampled, orientation)
+        val cropped = cropToScreenAspectRatio(context, corrected)
 
-        return scaleToLongEdge(corrected, WORKING_LONG_EDGE)
+        return scaleToLongEdge(cropped, WORKING_LONG_EDGE)
     }
 
     fun toPixelBuffer(bitmap: Bitmap): PixelBuffer {
@@ -49,6 +51,41 @@ object ImageDownscaler {
             sampleSize *= 2
         }
         return sampleSize
+    }
+
+    /**
+     * Center-crops [bitmap] to the device's own landscape aspect ratio, *before* anything
+     * downstream (terrain segmentation, tank placement across the terrain's width) ever
+     * sees it. Without this, a source photo whose own aspect ratio doesn't match the
+     * landscape-locked game screen's segments a terrain shaped like the photo, not the
+     * screen - and [com.scorchedphoto.app.game.WorldTransform]'s uniform-scale "cover" fit
+     * (see its doc) then has to crop the *rendered* terrain to actually fill the screen,
+     * potentially cutting away a large share of the real playable battlefield - tanks
+     * placed across the terrain's full original width could end up entirely outside the
+     * visible screen. Cropping here instead means the terrain is already shaped like the
+     * screen, so that render-time crop never needs to remove more than a sliver.
+     */
+    private fun cropToScreenAspectRatio(context: Context, bitmap: Bitmap): Bitmap {
+        val metrics = context.resources.displayMetrics
+        val longEdgePx = max(metrics.widthPixels, metrics.heightPixels)
+        val shortEdgePx = min(metrics.widthPixels, metrics.heightPixels)
+        if (shortEdgePx <= 0) return bitmap
+        val targetAspect = longEdgePx.toFloat() / shortEdgePx // width:height, landscape
+        val currentAspect = bitmap.width.toFloat() / bitmap.height
+
+        return when {
+            currentAspect > targetAspect -> {
+                val newWidth = (bitmap.height * targetAspect).roundToInt().coerceIn(1, bitmap.width)
+                val x = (bitmap.width - newWidth) / 2
+                Bitmap.createBitmap(bitmap, x, 0, newWidth, bitmap.height)
+            }
+            currentAspect < targetAspect -> {
+                val newHeight = (bitmap.width / targetAspect).roundToInt().coerceIn(1, bitmap.height)
+                val y = (bitmap.height - newHeight) / 2
+                Bitmap.createBitmap(bitmap, 0, y, bitmap.width, newHeight)
+            }
+            else -> bitmap
+        }
     }
 
     private fun scaleToLongEdge(bitmap: Bitmap, targetLongEdge: Int): Bitmap {
