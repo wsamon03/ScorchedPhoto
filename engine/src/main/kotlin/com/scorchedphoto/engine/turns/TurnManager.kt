@@ -2,7 +2,10 @@ package com.scorchedphoto.engine.turns
 
 import com.scorchedphoto.engine.tanks.Tank
 
-data class WinResult(val winningOwnerId: Int, val winningTankIds: List<Int>)
+/** [winningOwnerIds] has one entry for a normal win, or more than one for a tie (every
+ * remaining owner eliminated by the same shot - see [com.scorchedphoto.engine.GameEngine]'s
+ * mutual-elimination handling). */
+data class WinResult(val winningOwnerIds: List<Int>, val winningTankIds: List<Int>)
 
 /** Round-robins turn order over a fixed tank list, skipping eliminated tanks. */
 class TurnManager(private val tanks: List<Tank>) {
@@ -45,7 +48,7 @@ class TurnManager(private val tanks: List<Tank>) {
         if (aliveTanks.isEmpty()) return null
         val distinctOwners = aliveTanks.map { it.ownerId }.distinct()
         return if (distinctOwners.size == 1) {
-            WinResult(distinctOwners.first(), aliveTanks.map { it.id })
+            WinResult(distinctOwners, aliveTanks.map { it.id })
         } else {
             null
         }

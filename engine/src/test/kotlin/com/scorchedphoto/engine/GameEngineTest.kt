@@ -102,7 +102,7 @@ class GameEngineTest {
         assertEquals(MatchPhase.GAME_OVER, engine.phase)
         assertFalse(target.alive)
         assertNotNull(engine.winResult)
-        assertEquals(shooter.ownerId, engine.winResult?.winningOwnerId)
+        assertEquals(listOf(shooter.ownerId), engine.winResult?.winningOwnerIds)
     }
 
     @Test
@@ -409,5 +409,34 @@ class GameEngineTest {
         runUntilNotResolving(engine)
 
         assertEquals(Tank.MAX_HEALTH, tank.health)
+    }
+
+    @Test
+    fun `every remaining tank dying in the same resolution declares a tie instead of stalling`() {
+        val terrain = flatTerrain(width = 1000, groundY = 300)
+        val a = testTank(id = 1, ownerId = 1, x = 900f, health = Tank.MAX_HEALTH)
+        val b = testTank(id = 2, ownerId = 2, x = 300f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+
+        // `a` fires a weak, unrelated shot just to get the engine into FIRING/RESOLVING so
+        // tick() processes gravity (same pattern as the fall-damage tests above) - then
+        // the ground under *both* tanks (including the shooter itself) drops by a lethal
+        // amount, simulating a single blast big enough to undermine everyone left at once.
+        a.angleDeg = 90f
+        a.power = 1f
+        engine.fire()
+
+        terrain.groundY[a.x.toInt()] = 300 + 400
+        terrain.groundY[b.x.toInt()] = 300 + 400
+
+        runUntilNotResolving(engine)
+
+        assertEquals(MatchPhase.GAME_OVER, engine.phase)
+        assertFalse(a.alive)
+        assertFalse(b.alive)
+        val result = engine.winResult
+        assertNotNull("expected a tie result instead of a stalled match with no winner", result)
+        assertEquals(setOf(1, 2), result?.winningOwnerIds?.toSet())
+        assertEquals(setOf(1, 2), result?.winningTankIds?.toSet())
     }
 }

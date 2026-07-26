@@ -8,6 +8,5 @@ import javax.inject.Inject
 class VictoryViewModel @Inject constructor(
     private val matchResultRepository: MatchResultRepository,
 ) : ViewModel() {
-    val winnerName: String? get() = matchResultRepository.winnerName
-    val winnerColor: Int? get() = matchResultRepository.winnerColor
+    val winners: List<MatchWinner> get() = matchResultRepository.winners
 }

@@ -36,5 +36,6 @@ data class GameUiState(
     val tanks: List<TankHudInfo> = emptyList(),
     val windVelocity: Float = 0f,
     val windMaxMagnitude: Float = 15f,
-    val winnerOwnerId: Int? = null,
+    /** One entry for a normal win, more than one for a tie - see [com.scorchedphoto.engine.turns.WinResult]. */
+    val winnerOwnerIds: List<Int> = emptyList(),
 )

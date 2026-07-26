@@ -34,14 +34,16 @@ fun VictoryScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text("Victory!", style = MaterialTheme.typography.headlineMedium)
-            val winnerName = viewModel.winnerName
-            if (winnerName != null) {
-                val color = viewModel.winnerColor?.let { Color(it) } ?: Color.Unspecified
+            val winners = viewModel.winners
+            Text(
+                if (winners.size > 1) "Tie!" else "Victory!",
+                style = MaterialTheme.typography.headlineMedium,
+            )
+            winners.forEach { winner ->
                 Text(
-                    text = winnerName,
+                    text = winner.name,
                     style = MaterialTheme.typography.headlineSmall,
-                    color = color,
+                    color = Color(winner.color),
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }

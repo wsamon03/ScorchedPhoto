@@ -45,6 +45,11 @@ class GameEngine(
     private val activeImpactEffects = mutableListOf<ImpactEffect>()
     private val pendingEvents = mutableListOf<GameEvent>()
 
+    // Ids of tanks killed since the current shot was fired - reset at the start of each
+    // fire(). Used only for the mutual-elimination tie case in finishResolution(), where
+    // TurnManager.checkWinCondition() has no alive tank left to identify a winner from.
+    private val killedThisResolution = mutableSetOf<Int>()
+
     var phase: MatchPhase = MatchPhase.AIMING
         private set
 
@@ -79,6 +84,7 @@ class GameEngine(
     fun fire(): Boolean {
         val shooter = currentTank ?: return false
         if (phase != MatchPhase.AIMING) return false
+        killedThisResolution.clear()
         val weapon = WeaponCatalog.byType(shooter.currentWeapon)
         if (weapon.ammoLimit != null) {
             val remaining = ammoRemaining[shooter.id]?.get(weapon.type) ?: 0
@@ -183,19 +189,26 @@ class GameEngine(
                 damage == null -> {
                     if (projectile.weapon.maxDamage > 0) {
                         tank.health = 0
-                        tank.alive = false
-                        tank.pendingBurn = true
+                        kill(tank)
                     }
                 }
                 damage > 0 -> {
                     tank.health = (tank.health - damage).coerceAtLeast(0)
                     if (tank.health == 0) {
-                        tank.alive = false
-                        tank.pendingBurn = true
+                        kill(tank)
                     }
                 }
             }
         }
+    }
+
+    /** Marks [tank] dead and queues its death animation - see [Tank.pendingBurn] - and
+     * records it in [killedThisResolution] so a mutual-elimination tie (see
+     * [finishResolution]) can still name who was actually tied. */
+    private fun kill(tank: Tank) {
+        tank.alive = false
+        tank.pendingBurn = true
+        killedThisResolution += tank.id
     }
 
     private fun splitMirv(parent: Projectile): List<Projectile> {
@@ -260,8 +273,7 @@ class GameEngine(
         if (damage > 0) {
             tank.health = (tank.health - damage).coerceAtLeast(0)
             if (tank.health == 0) {
-                tank.alive = false
-                tank.pendingBurn = true
+                kill(tank)
             }
         }
     }
@@ -320,7 +332,7 @@ class GameEngine(
     }
 
     private fun finishResolution() {
-        val result = turnManager.checkWinCondition()
+        val result = turnManager.checkWinCondition() ?: mutualEliminationTie()
         if (result != null) {
             winResult = result
             phase = MatchPhase.GAME_OVER
@@ -329,6 +341,21 @@ class GameEngine(
         turnManager.advanceToNextAliveTank()
         wind.reroll(maxWindMagnitude, rng)
         phase = MatchPhase.AIMING
+    }
+
+    /**
+     * [TurnManager.checkWinCondition] can only name a winner when exactly one owner still
+     * has a tank standing - it returns null (not a tie) both while the match is still
+     * ongoing and when literally every remaining tank was eliminated by the same
+     * resolution (e.g. one blast reaching everyone left, or the shooter also dying to a
+     * fall from the same shot). This distinguishes the two: only when nobody survived does
+     * it declare a tie, among whichever owners [killedThisResolution] shows actually died
+     * just now - never among tanks eliminated in earlier, separate turns.
+     */
+    private fun mutualEliminationTie(): WinResult? {
+        if (tanks.any { it.alive } || killedThisResolution.isEmpty()) return null
+        val tiedTanks = tanks.filter { it.id in killedThisResolution }
+        return WinResult(tiedTanks.map { it.ownerId }.distinct(), tiedTanks.map { it.id })
     }
 
     companion object {

@@ -37,8 +37,8 @@ fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel
         insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
-    LaunchedEffect(uiState.winnerOwnerId) {
-        if (uiState.winnerOwnerId != null) {
+    LaunchedEffect(uiState.winnerOwnerIds) {
+        if (uiState.winnerOwnerIds.isNotEmpty()) {
             onMatchOver()
         }
     }

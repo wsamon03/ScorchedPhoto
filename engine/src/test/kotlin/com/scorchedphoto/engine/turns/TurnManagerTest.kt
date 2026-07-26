@@ -58,7 +58,7 @@ class TurnManagerTest {
         val manager = TurnManager(tanks)
         val result = manager.checkWinCondition()
         assertNotNull(result)
-        assertEquals(1, result?.winningOwnerId)
+        assertEquals(listOf(1), result?.winningOwnerIds)
         assertEquals(listOf(1, 3), result?.winningTankIds)
     }
 

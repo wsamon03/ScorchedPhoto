@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import com.scorchedphoto.app.audio.GameSoundController
 import com.scorchedphoto.app.capture.PhotoRepository
 import com.scorchedphoto.app.result.MatchResultRepository
+import com.scorchedphoto.app.result.MatchWinner
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
@@ -101,9 +102,8 @@ class GameViewModel @Inject constructor(
         val current = engine.currentTank
         val winResult = engine.winResult
         if (winResult != null) {
-            val winnerTank = engine.tanks.firstOrNull { it.ownerId == winResult.winningOwnerId }
-            matchResultRepository.winnerName = winnerTank?.name
-            matchResultRepository.winnerColor = winnerTank?.color
+            val winnerTanks = engine.tanks.filter { it.ownerId in winResult.winningOwnerIds }
+            matchResultRepository.winners = winnerTanks.map { MatchWinner(it.name, it.color) }
         }
 
         _uiState.value = GameUiState(
@@ -127,7 +127,7 @@ class GameViewModel @Inject constructor(
             tanks = engine.tanks.map { TankHudInfo(it.id, it.name, it.color, it.health, it.alive) },
             windVelocity = engine.wind.velocity,
             windMaxMagnitude = engine.maxWindMagnitude,
-            winnerOwnerId = winResult?.winningOwnerId,
+            winnerOwnerIds = winResult?.winningOwnerIds ?: emptyList(),
         )
     }
 }
