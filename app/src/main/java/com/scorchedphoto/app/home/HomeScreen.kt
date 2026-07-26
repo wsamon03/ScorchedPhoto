@@ -18,8 +18,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.ContentScale
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.ui.layout.ContentScale
 import com.scorchedphoto.app.R
 import com.scorchedphoto.app.ui.LockScreenOrientation
 
