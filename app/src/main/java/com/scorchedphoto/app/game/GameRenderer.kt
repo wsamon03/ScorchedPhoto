@@ -77,6 +77,19 @@ class GameRenderer(
     private val speechBubbleTailFillPath = Path()
     private val speechBubbleTailOutlinePath = Path()
 
+    // Reused every frame rather than allocated fresh - both rebuild from the full terrain
+    // width unconditionally every frame, so a fresh Path() here was a real per-frame cost.
+    private val craterPath = Path()
+    private val horizonPath = Path()
+
+    // Reused every frame for the same reason - see the loop above.
+    private val backgroundRect = RectF()
+
+    // Each tank's body Path, created once per tank id and reused every frame (rebuilt via
+    // .reset() since a tank's cx/cy/slope-rotation genuinely can change frame to frame) -
+    // see tankBodyPathFor. Avoids allocating a fresh Path per tank per frame.
+    private val tankBodyPaths = mutableMapOf<Int, Path>()
+
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
     // Decoded once and reused every frame - see assets/fire/, extracted from the source
@@ -130,13 +143,13 @@ class GameRenderer(
         )
 
         if (photo != null && srcRect != null) {
-            val dst = RectF(
+            backgroundRect.set(
                 transform.screenX(0f),
                 transform.screenY(0f),
                 transform.screenX(terrain.width.toFloat()),
                 transform.screenY(terrain.height.toFloat()),
             )
-            canvas.drawBitmap(photo, srcRect, dst, backgroundPaint)
+            canvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
         }
 
         drawCraterScars(canvas, terrain, transform)
@@ -195,7 +208,7 @@ class GameRenderer(
     }
 
     private fun drawCraterScars(canvas: Canvas, terrain: HeightMap, transform: WorldTransform) {
-        val path = Path()
+        craterPath.reset()
         var started = false
         for (x in 0 until terrain.width) {
             val original = originalGroundY.getOrElse(x) { terrain.groundY[x] }
@@ -207,32 +220,32 @@ class GameRenderer(
             val px = transform.screenX(x.toFloat())
             val py = transform.screenY(current.toFloat())
             if (!started) {
-                path.moveTo(px, py)
+                craterPath.moveTo(px, py)
                 started = true
             } else {
-                path.lineTo(px, py)
+                craterPath.lineTo(px, py)
             }
         }
         craterPaint.strokeWidth = CRATER_STROKE_WIDTH * transform.scale
-        canvas.drawPath(path, craterPaint)
+        canvas.drawPath(craterPath, craterPaint)
     }
 
     private fun drawHorizonLine(canvas: Canvas, terrain: HeightMap, transform: WorldTransform) {
-        val path = Path()
+        horizonPath.reset()
         var started = false
         for (x in 0 until terrain.width) {
             val groundY = terrain.groundY[x]
             val px = transform.screenX(x.toFloat())
             val py = transform.screenY(groundY.toFloat())
             if (!started) {
-                path.moveTo(px, py)
+                horizonPath.moveTo(px, py)
                 started = true
             } else {
-                path.lineTo(px, py)
+                horizonPath.lineTo(px, py)
             }
         }
         horizonPaint.strokeWidth = HORIZON_STROKE_WIDTH * transform.scale
-        canvas.drawPath(path, horizonPaint)
+        canvas.drawPath(horizonPath, horizonPaint)
     }
 
     private fun drawImpactEffects(canvas: Canvas, impactEffects: List<ImpactEffect>, transform: WorldTransform) {
@@ -319,7 +332,7 @@ class GameRenderer(
         tankBodyPaint.color = colorOverride ?: tank.color
         canvas.save()
         canvas.rotate(slopeDeg, cx, cy)
-        canvas.drawPath(tankBodyPath(tank.shape, cx, cy, halfWidth), tankBodyPaint)
+        canvas.drawPath(tankBodyPathFor(tank, cx, cy, halfWidth), tankBodyPaint)
         canvas.restore()
 
         // Barrel angle is an absolute aim reference, so it's drawn unrotated by slope.
@@ -476,10 +489,14 @@ class GameRenderer(
         canvas.drawText(message, cx, baselineY, speechBubbleTextPaint)
     }
 
-    /** Builds [shape]'s normalized outline (see [TankShape]) into a screen-space [Path]. */
-    private fun tankBodyPath(shape: TankShape, cx: Float, cy: Float, halfWidth: Float): Path {
-        val path = Path()
-        shape.outline.forEachIndexed { index, (nx, ny) ->
+    /** [tank]'s body outline (see [TankShape]) built into a screen-space [Path] - the [Path]
+     * object is created once per tank id and cached, but still rebuilt via [Path.reset] every
+     * call, since [cx]/[cy] (the tank's own position) and the canvas-rotation this is drawn
+     * under can genuinely change frame to frame. */
+    private fun tankBodyPathFor(tank: Tank, cx: Float, cy: Float, halfWidth: Float): Path {
+        val path = tankBodyPaths.getOrPut(tank.id) { Path() }
+        path.reset()
+        tank.shape.outline.forEachIndexed { index, (nx, ny) ->
             val x = cx + nx * halfWidth
             val y = cy + ny * halfWidth
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)

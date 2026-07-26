@@ -80,13 +80,19 @@ fun HudOverlay(
     val gapPx = with(density) { POWER_METER_HORIZONTAL_GAP.toPx() }
     val meterWidthPx = with(density) { POWER_METER_WIDTH.toPx() }
     val meterHeightPx = with(density) { POWER_METER_HEIGHT.toPx() }
-    // Toward the screen's horizontal middle from the tank, so the meter never needs
-    // edge-clamping - and vertically centered on the tank's own height, not the
-    // screen's, per the user's explicit positioning choice.
+    // Leans toward the screen's horizontal middle from the tank first (the common case
+    // needs no further correction), and is vertically centered on the tank's own height by
+    // default - but a tank can sit anywhere in the canvas, including right up against an
+    // edge (e.g. a peak near the top, a valley near the bottom), so both axes are still
+    // coerced into the canvas bounds afterward to guarantee the bar's full size never
+    // renders off-screen.
     val towardCenter = if (tankScreenX < canvasSizePx.width / 2f) 1f else -1f
-    val meterX = tankScreenX + towardCenter * (touchRadiusPx + gapPx) -
-        if (towardCenter < 0f) meterWidthPx else 0f
-    val meterY = tankScreenY - meterHeightPx / 2f
+    val meterX = (
+        tankScreenX + towardCenter * (touchRadiusPx + gapPx) -
+            if (towardCenter < 0f) meterWidthPx else 0f
+        ).coerceIn(0f, (canvasSizePx.width - meterWidthPx).coerceAtLeast(0f))
+    val meterY = (tankScreenY - meterHeightPx / 2f)
+        .coerceIn(0f, (canvasSizePx.height - meterHeightPx).coerceAtLeast(0f))
 
     // Wraps onCommand to snapshot a fired shot's angle/power/position for the brief
     // post-release readout - AngleRing's own SetAngle drags don't go through this.

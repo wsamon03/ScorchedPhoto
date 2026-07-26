@@ -127,18 +127,24 @@ class GameEngine(
         }
     }
 
+    // Filters activeProjectiles in place via its own iterator instead of rebuilding fresh
+    // "still flying"/"to split" lists every call - this runs up to 60x/sec on the app's
+    // render thread for the entire duration of every shot's flight, so the common case (one
+    // projectile, still flying, nothing to remove or split) allocates nothing at all instead
+    // of two fresh lists per tick.
     private fun tickProjectiles(dt: Float) {
         if (activeProjectiles.isEmpty()) return
 
-        val stillFlying = mutableListOf<Projectile>()
-        val toSplit = mutableListOf<Projectile>()
-
-        for (p in activeProjectiles) {
+        var spawned: MutableList<Projectile>? = null
+        val iterator = activeProjectiles.iterator()
+        while (iterator.hasNext()) {
+            val p = iterator.next()
             val wasPastApex = p.hasPassedApex
             stepProjectile(p, wind, dt)
 
             if (p.weapon.childCount > 1 && !wasPastApex && p.hasPassedApex) {
-                toSplit += p
+                (spawned ?: mutableListOf<Projectile>().also { spawned = it }) += splitMirv(p)
+                iterator.remove()
                 continue
             }
 
@@ -161,18 +167,13 @@ class GameEngine(
                 touchedTank || p.y >= terrainY -> {
                     resolveImpact(p.weapon, p.x, terrainY.toFloat())
                     pendingEvents += GameEvent.Impact
+                    iterator.remove()
                 }
-                p.x < -terrain.width || p.x > 2 * terrain.width -> Unit // fizzle, flew off into the void
-                else -> stillFlying += p
+                p.x < -terrain.width || p.x > 2 * terrain.width -> iterator.remove() // fizzle, flew off into the void
             }
         }
 
-        for (parent in toSplit) {
-            stillFlying += splitMirv(parent)
-        }
-
-        activeProjectiles.clear()
-        activeProjectiles += stillFlying
+        spawned?.let { activeProjectiles += it }
     }
 
     /**

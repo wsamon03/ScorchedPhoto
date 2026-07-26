@@ -63,7 +63,12 @@ class GameLoopThread(
         while (running) {
             val frameStartNanos = System.nanoTime()
             val frameDeltaSeconds = (frameStartNanos - lastNanos) / 1_000_000_000f
-            accumulator += frameDeltaSeconds
+            // Capped so a single slow frame (GC pause, brief scheduling hiccup) can't queue
+            // up an unbounded catch-up burst of ticks below - each rendered frame only shows
+            // the position after however many ticks ran, so a big burst reads as the
+            // projectile visibly jumping rather than a smooth slowdown. MAX_ACCUMULATED_SECONDS
+            // still allows several ticks' worth of catch-up, just not an unbounded amount.
+            accumulator = (accumulator + frameDeltaSeconds).coerceAtMost(MAX_ACCUMULATED_SECONDS)
             lastNanos = frameStartNanos
 
             drainAndApplyCommands()
@@ -259,6 +264,12 @@ class GameLoopThread(
         private const val TARGET_FRAME_NANOS = 1_000_000_000L / 60L
         private const val CPU_THINKING_SECONDS = 1.2f
         private const val FIRE_SOUND_LEAD_SECONDS = 0.25f
+
+        // Spiral-of-death guard for the fixed-timestep accumulator above - see its own
+        // comment. ~83ms/5 ticks of headroom absorbs a real hiccup smoothly without letting a
+        // pathological stall try to simulate dozens of ticks in one rendered frame.
+        private const val MAX_TICKS_PER_FRAME = 5
+        private const val MAX_ACCUMULATED_SECONDS = FIXED_DT * MAX_TICKS_PER_FRAME
 
         // How long a pre-fire taunt's speech bubble stays up before the shot itself
         // (sound/whistle/missile) begins - matches how long a dying tank's own burn taunt
