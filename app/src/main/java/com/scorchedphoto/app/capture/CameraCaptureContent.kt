@@ -2,6 +2,8 @@ package com.scorchedphoto.app.capture
 
 import android.content.Context
 import android.net.Uri
+import android.view.OrientationEventListener
+import android.view.Surface
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -57,6 +59,30 @@ fun CameraCaptureContent(onCaptured: (Uri) -> Unit, onCancel: () -> Unit) {
         onDispose {
             runCatching { ProcessCameraProvider.getInstance(context).get().unbindAll() }
         }
+    }
+
+    // ImageCapture's targetRotation is fixed to the display's rotation at the moment the use
+    // case was built (see remember block above) and never updates on its own - so without this,
+    // a photo taken while physically holding the phone in landscape (but built while the
+    // Activity was still laid out in portrait, e.g. PhotoSourceScreen's SCREEN_ORIENTATION_USER
+    // lock not actually rotating the UI) gets EXIF-tagged for the wrong orientation, and our
+    // later EXIF correction then turns what should stay a landscape photo into a portrait one.
+    // Tracking the device's physical orientation independently of the Activity's UI rotation
+    // keeps targetRotation correct regardless of whether the UI itself ever rotates.
+    DisposableEffect(imageCapture) {
+        val orientationEventListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                imageCapture.targetRotation = when (orientation) {
+                    in 45 until 135 -> Surface.ROTATION_270
+                    in 135 until 225 -> Surface.ROTATION_180
+                    in 225 until 315 -> Surface.ROTATION_90
+                    else -> Surface.ROTATION_0
+                }
+            }
+        }
+        orientationEventListener.enable()
+        onDispose { orientationEventListener.disable() }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
