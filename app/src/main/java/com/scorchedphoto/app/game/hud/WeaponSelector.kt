@@ -16,6 +16,9 @@ private fun WeaponType.displayName(): String = when (this) {
     WeaponType.BIG_BERTHA -> "Bertha"
     WeaponType.MIRV -> "MIRV"
     WeaponType.BABY_MISSILE -> "Baby"
+    // Never actually reaches this selector - WeaponCatalog.all excludes it (a tank's own
+    // death blast, not a player-selectable weapon) - see WeaponCatalog.TANK_DEATH_EXPLOSION.
+    WeaponType.TANK_EXPLOSION -> "Explosion"
 }
 
 @Composable
