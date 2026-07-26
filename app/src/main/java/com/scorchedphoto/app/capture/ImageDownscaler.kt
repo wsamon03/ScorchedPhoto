@@ -33,9 +33,14 @@ object ImageDownscaler {
 
     /**
      * Crops [bitmap] to the user-chosen [cropRect] (in [bitmap]'s own pixel space, produced by
-     * [PhotoCropScreen]/[PhotoCropViewModel]) and scales the result down to [WORKING_LONG_EDGE] -
-     * the same finishing step [loadCorrected]'s output previously always got via an
-     * always-centered crop. [cropRect] is clamped to [bitmap]'s bounds defensively.
+     * [PhotoCropScreen]/[PhotoCropViewModel]) and normalizes the result to exactly
+     * [WORKING_LONG_EDGE] on its long edge - scaling up as readily as down. This size becomes
+     * [com.scorchedphoto.terrain.HeightMap]'s width/height (the game engine's whole coordinate
+     * space), so it has to stay constant regardless of how far the user zoomed while cropping:
+     * a variable-sized "world" would make [com.scorchedphoto.app.game.WorldTransform]'s
+     * screen-to-world scale factor vary with zoom too, throwing off tank/explosion sizes and
+     * how far projectiles visibly travel per physics tick. [cropRect] is clamped to [bitmap]'s
+     * bounds defensively.
      */
     fun cropAndFinish(bitmap: Bitmap, cropRect: Rect): Bitmap {
         val clamped = Rect(cropRect).apply {
@@ -68,7 +73,7 @@ object ImageDownscaler {
 
     private fun scaleToLongEdge(bitmap: Bitmap, targetLongEdge: Int): Bitmap {
         val longEdge = max(bitmap.width, bitmap.height)
-        if (longEdge <= targetLongEdge) return bitmap
+        if (longEdge == targetLongEdge) return bitmap
         val scale = targetLongEdge.toFloat() / longEdge
         val newWidth = max(1, (bitmap.width * scale).roundToInt())
         val newHeight = max(1, (bitmap.height * scale).roundToInt())

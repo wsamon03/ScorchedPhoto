@@ -1,7 +1,6 @@
 package com.scorchedphoto.app.game
 
 import android.content.pm.ActivityInfo
-import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -11,31 +10,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scorchedphoto.app.game.hud.HudOverlay
 import com.scorchedphoto.app.game.turntransition.PassDeviceScreen
+import com.scorchedphoto.app.ui.ImmersiveMode
 import com.scorchedphoto.app.ui.LockScreenOrientation
 import com.scorchedphoto.engine.MatchPhase
 
 @Composable
 fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel()) {
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+    ImmersiveMode()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val view = LocalView.current
-
-    LaunchedEffect(Unit) {
-        val window = (view.context as? androidx.activity.ComponentActivity)?.window ?: return@LaunchedEffect
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        val insetsController = WindowCompat.getInsetsController(window, view) ?: return@LaunchedEffect
-        insetsController.hide(WindowInsetsCompat.Type.statusBars())
-        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    }
 
     LaunchedEffect(uiState.winnerOwnerIds) {
         if (uiState.winnerOwnerIds.isNotEmpty()) {
