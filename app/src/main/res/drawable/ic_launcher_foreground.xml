@@ -38,10 +38,26 @@
     <path
         android:fillColor="#FFD700"
         android:pathData="M82,88 Q78,82 82,68 Q86,82 88,66 Q92,88 90,90 Z" />
-    <!-- Red tank as single connected shape -->
+    <!-- Tank tracks -->
+    <path
+        android:fillColor="#880000"
+        android:pathData="M36,78 L72,78 L74,82 L34,82 Z" />
+    <!-- Tank body -->
     <path
         android:fillColor="#CC0000"
-        android:pathData="M40,76 L68,76 L70,72 L70,64 A8,8 0 0,1 62,52 L48,38 L44,42 L58,56 A8,8 0 0,1 38,64 L38,72 Z" />
+        android:pathData="M40,70 L68,70 L70,76 L38,76 Z" />
+    <!-- Tank turret base -->
+    <path
+        android:fillColor="#DD0000"
+        android:pathData="M46,65 L62,65 L64,70 L44,70 Z" />
+    <!-- Tank turret dome -->
+    <path
+        android:fillColor="#DD0000"
+        android:pathData="M48,65 L60,65 A6,6 0 0,0 54,55 A6,6 0 0,0 48,65 Z" />
+    <!-- Tank cannon barrel -->
+    <path
+        android:fillColor="#BB0000"
+        android:pathData="M52,60 L38,42 L40,40 L54,58 Z" />
     <!-- Original sun/moon circle -->
     <path
         android:fillColor="#FFFFFF"
