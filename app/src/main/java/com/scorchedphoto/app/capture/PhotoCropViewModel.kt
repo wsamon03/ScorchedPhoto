@@ -37,19 +37,30 @@ class PhotoCropViewModel @Inject constructor(
 
     private var frameWidthPx = 0f
     private var frameHeightPx = 0f
-    private var frameSizeKnown = false
 
-    /** Called once the crop frame's on-screen size is known - seeds the initial zoom/pan to
-     * exactly cover the frame, centered, matching the old automatic center-crop's default
-     * framing before the user drags/pinches away from it. A no-op after the first call, so a
-     * later relayout can't silently discard the user's in-progress crop. */
+    /**
+     * Called on every layout pass of the crop frame - not just the first. The frame locks to
+     * landscape on entry (see [PhotoCropScreen] doc), and that rotation away from whatever
+     * orientation [PhotoSourceScreen] left the device in is asynchronous, so early calls here
+     * can report a transient, not-yet-rotated size; latching onto just the first call would
+     * freeze the whole crop on that wrong size forever. Instead this always refreshes the
+     * frame size and re-clamps scale/pan into whatever's valid for it, converging on the
+     * correct framing once the rotation settles - and since pan starts at (0, 0) and clamping
+     * never moves an already-in-range value, the crop stays centered throughout for a user who
+     * hasn't touched anything yet.
+     */
     fun onFrameSizeChanged(widthPx: Float, heightPx: Float) {
-        if (widthPx <= 0f || heightPx <= 0f || frameSizeKnown) return
+        if (widthPx <= 0f || heightPx <= 0f) return
         frameWidthPx = widthPx
         frameHeightPx = heightPx
-        frameSizeKnown = true
         val photo = _uiState.value.photo ?: return
-        _uiState.value = _uiState.value.copy(scale = coverScale(photo), panX = 0f, panY = 0f)
+        val minScale = coverScale(photo)
+        val newScale = _uiState.value.scale.coerceAtLeast(minScale)
+        val maxPanX = maxPan(photo.width, newScale, frameWidthPx)
+        val maxPanY = maxPan(photo.height, newScale, frameHeightPx)
+        val newPanX = _uiState.value.panX.coerceIn(-maxPanX, maxPanX)
+        val newPanY = _uiState.value.panY.coerceIn(-maxPanY, maxPanY)
+        _uiState.value = _uiState.value.copy(scale = newScale, panX = newPanX, panY = newPanY)
     }
 
     /** Applies one frame of a pinch/drag gesture: [zoomFactor] multiplies the current scale
