@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.ContentScale
 import androidx.compose.foundation.layout.systemBarsPadding
 import com.scorchedphoto.app.R
 import com.scorchedphoto.app.ui.LockScreenOrientation
@@ -33,7 +34,7 @@ fun HomeScreen(onNewGame: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer(alpha = 0.6f),
-            contentScale = androidx.compose.foundation.layout.ContentScale.Crop,
+            contentScale = ContentScale.Crop,
         )
 
         // Semi-transparent overlay for better text visibility
