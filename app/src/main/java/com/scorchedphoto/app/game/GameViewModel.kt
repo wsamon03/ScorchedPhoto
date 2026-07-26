@@ -92,6 +92,18 @@ class GameViewModel @Inject constructor(
      * assigned - see GameRenderer.burnMessageFor - so it's spoken exactly once per death,
      * in that tank's own chosen voice/pitch/rate. Safe to call from any thread. */
     fun onBurnMessageAssigned(tankId: Int, spokenText: String) {
+        speakForTank(tankId, spokenText)
+    }
+
+    /** Called by [GameLoopThread] the moment a tank's pre-fire taunt is chosen - see
+     * GameLoopThread.beginFireSequence - so it's spoken once per shot, in that tank's own
+     * chosen voice/pitch/rate, the same way [onBurnMessageAssigned] speaks a death taunt.
+     * Safe to call from any thread. */
+    fun onFireMessageAssigned(tankId: Int, spokenText: String) {
+        speakForTank(tankId, spokenText)
+    }
+
+    private fun speakForTank(tankId: Int, spokenText: String) {
         val settings = voiceSettings.getOrElse(tankId) { TankVoiceSettings(null, 1f, 1f) }
         if (settings.voiceId == VoiceOption.NONE.id) return
         deathLineSpeaker.speak(spokenText, settings.voiceId, settings.pitch, settings.speechRate)

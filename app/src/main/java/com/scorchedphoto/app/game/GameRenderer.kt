@@ -101,6 +101,8 @@ class GameRenderer(
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
         currentTankId: Int?,
+        firingTankId: Int? = null,
+        firingMessage: String? = null,
     ) {
         canvas.drawColor(Color.BLACK)
         val transform = WorldTransform.fit(
@@ -154,6 +156,8 @@ class GameRenderer(
             drawTank(canvas, tank, terrain, transform, colorOverride)
             if (tank.burning) {
                 drawBurningTank(canvas, tank, transform)
+            } else if (tank.id == firingTankId && firingMessage != null) {
+                drawFiringSpeechBubble(canvas, tank, transform, firingMessage)
             }
         }
     }
@@ -327,6 +331,18 @@ class GameRenderer(
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
 
         drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank).displayText)
+    }
+
+    /** Shows a tank's pre-fire taunt - see [GameLoopThread.beginFireSequence], which picks
+     * the line and passes it down through [draw] as `firingMessage` - in the same bubble
+     * style and at the same height above the tank as [drawBurningTank]'s death taunt, so
+     * the two read as the same kind of moment. */
+    private fun drawFiringSpeechBubble(canvas: Canvas, tank: Tank, transform: WorldTransform, message: String) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        val bubbleTailTipY = cy - halfWidth * 0.2f - halfWidth * FIRE_HEIGHT_MULTIPLIER
+        drawSpeechBubble(canvas, cx, bubbleTailTipY, message)
     }
 
     /** The taunt a burning tank is showing - assigned once (the first time this tank is

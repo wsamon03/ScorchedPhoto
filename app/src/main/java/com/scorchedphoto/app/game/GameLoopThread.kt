@@ -26,6 +26,7 @@ class GameLoopThread(
     private val renderer: GameRenderer,
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
+    private val onFireMessageAssigned: (Int, String) -> Unit,
     private val soundController: GameSoundController,
 ) : Thread("GameLoopThread") {
 
@@ -44,6 +45,16 @@ class GameLoopThread(
     // so sound always and consistently leads it.
     private var pendingFireElapsed: Float? = null
 
+    // Seconds since a fire was triggered but before the shot sound/whistle/missile
+    // sequence (beginFire) actually starts - null when no pre-fire taunt is pending. See
+    // beginFireSequence/advancePendingSpeech: the firing tank says a line first, the same
+    // way a dying tank's burn taunt is shown and spoken before its own closing explosion,
+    // and only once that's had time to play does the usual beginFire/pendingFireElapsed
+    // sequence take over.
+    private var pendingSpeechTankId: Int? = null
+    private var pendingSpeechText: String? = null
+    private var pendingSpeechElapsed: Float? = null
+
     override fun run() {
         var accumulator = 0f
         var lastNanos = System.nanoTime()
@@ -56,6 +67,7 @@ class GameLoopThread(
             lastNanos = frameStartNanos
 
             drainAndApplyCommands()
+            advancePendingSpeech(frameDeltaSeconds)
             advancePendingFire(frameDeltaSeconds)
 
             var ticked = false
@@ -78,7 +90,16 @@ class GameLoopThread(
             val canvas = surfaceHolder.lockCanvas()
             if (canvas != null) {
                 try {
-                    renderer.draw(canvas, engine.terrain, engine.tanks, engine.projectiles, engine.impactEffects, engine.currentTank?.id)
+                    renderer.draw(
+                        canvas,
+                        engine.terrain,
+                        engine.tanks,
+                        engine.projectiles,
+                        engine.impactEffects,
+                        engine.currentTank?.id,
+                        pendingSpeechTankId,
+                        pendingSpeechText,
+                    )
                 } finally {
                     surfaceHolder.unlockCanvasAndPost(canvas)
                 }
@@ -126,6 +147,32 @@ class GameLoopThread(
         soundController.updateBurningTanks(engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id })
     }
 
+    /** Kicks off a shot: picks a random pre-fire taunt for [tankId], hands it to
+     * [onFireMessageAssigned] so it's spoken once (mirroring
+     * [com.scorchedphoto.app.game.GameRenderer]'s death-taunt speak-once pattern), and
+     * holds off the actual [beginFire] (shot sound, whistle, missile) until
+     * [advancePendingSpeech] has given the line [FIRE_SPEECH_LEAD_SECONDS] to play out. */
+    private fun beginFireSequence(tankId: Int) {
+        val taunt = FIRE_TAUNTS.random(cpuRandom)
+        pendingSpeechTankId = tankId
+        pendingSpeechText = taunt
+        pendingSpeechElapsed = 0f
+        onFireMessageAssigned(tankId, taunt)
+    }
+
+    private fun advancePendingSpeech(dt: Float) {
+        val elapsed = pendingSpeechElapsed ?: return
+        val newElapsed = elapsed + dt
+        if (newElapsed >= FIRE_SPEECH_LEAD_SECONDS) {
+            pendingSpeechTankId = null
+            pendingSpeechText = null
+            pendingSpeechElapsed = null
+            beginFire()
+        } else {
+            pendingSpeechElapsed = newElapsed
+        }
+    }
+
     /** Plays the shot sound and starts the whistle at this shot's actual launch pitch
      * (mirroring the same capped-power -> launchVelocity math [GameEngine.fire] uses, so
      * there's no audible pitch jump once the real projectile takes over next frame),
@@ -154,7 +201,7 @@ class GameLoopThread(
     /** CPU turns aren't driven by [GameCommand]s - the loop thread already owns engine
      * mutation, so it can aim and fire directly once a short "thinking" delay elapses. */
     private fun maybeTakeCpuTurn(dt: Float) {
-        if (pendingFireElapsed != null) return // already mid-windup for this shot
+        if (pendingSpeechElapsed != null || pendingFireElapsed != null) return // already mid-windup for this shot
         if (engine.phase != MatchPhase.AIMING) {
             cpuThinkingForTankId = null
             return
@@ -180,7 +227,7 @@ class GameLoopThread(
         val aim = CpuAimCalculator.computeAim(current, target, engine.terrain, engine.wind, current.difficulty, cpuRandom)
         current.angleDeg = aim.angleDeg
         current.power = aim.power
-        beginFire()
+        beginFireSequence(current.id)
         cpuThinkingForTankId = null
     }
 
@@ -191,9 +238,10 @@ class GameLoopThread(
                 is GameCommand.SetAngle -> engine.currentTank?.angleDeg = normalizeAngleDeg(command.angleDeg)
                 is GameCommand.SetWeapon -> engine.currentTank?.currentWeapon = command.weaponType
                 is GameCommand.FireWithPower -> {
-                    if (pendingFireElapsed == null) {
-                        engine.currentTank?.power = command.power
-                        beginFire()
+                    if (pendingSpeechElapsed == null && pendingFireElapsed == null) {
+                        val shooter = engine.currentTank
+                        shooter?.power = command.power
+                        shooter?.let { beginFireSequence(it.id) }
                     }
                 }
             }
@@ -206,5 +254,28 @@ class GameLoopThread(
         private const val TARGET_FRAME_NANOS = 1_000_000_000L / 60L
         private const val CPU_THINKING_SECONDS = 1.2f
         private const val FIRE_SOUND_LEAD_SECONDS = 0.25f
+
+        // How long a pre-fire taunt's speech bubble stays up before the shot itself
+        // (sound/whistle/missile) begins - matches how long a dying tank's own burn taunt
+        // stays up (GameEngine.TANK_BURNING_DURATION_SECONDS) before its closing explosion,
+        // so both taunts get the same amount of time to read/play out.
+        private const val FIRE_SPEECH_LEAD_SECONDS = 2f
+
+        private val FIRE_TAUNTS = listOf(
+            "I've got you now!",
+            "You're a gonner!",
+            "Cowabunga!",
+            "Let's do this!",
+            "You made me do this!",
+            "1, 2, 3, 4, my bombs are gonna score!",
+            "Bombs away!",
+            "Fire!",
+            "Fiiirrree!",
+            "Die!",
+            "Death to all!",
+            "Oops...",
+            "My bad.",
+            "Is this how it works?",
+        )
     }
 }

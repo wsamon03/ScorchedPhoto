@@ -21,6 +21,7 @@ class GameSurfaceView(
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
     onBurnMessageAssigned: (Int, String) -> Unit,
+    private val onFireMessageAssigned: (Int, String) -> Unit,
     private val soundController: GameSoundController,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
@@ -33,7 +34,7 @@ class GameSurfaceView(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged, soundController)
+        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged, onFireMessageAssigned, soundController)
         thread.running = true
         thread.start()
         loopThread = thread
