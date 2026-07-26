@@ -26,8 +26,8 @@ class PhotoSourceViewModel @Inject constructor(
         _errorMessage.value = null
         viewModelScope.launch(Dispatchers.Default) {
             try {
-                val bitmap = ImageDownscaler.loadDownscaledAndCorrected(context, uri)
-                photoRepository.workingPhoto = bitmap
+                val bitmap = ImageDownscaler.loadCorrected(context, uri)
+                photoRepository.rawPhoto = bitmap
                 withContext(Dispatchers.Main) { onComplete() }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

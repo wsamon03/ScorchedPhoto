@@ -5,6 +5,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.scorchedphoto.app.capture.PhotoCropScreen
 import com.scorchedphoto.app.capture.PhotoSourceScreen
 import com.scorchedphoto.app.game.GameScreen
 import com.scorchedphoto.app.home.HomeScreen
@@ -22,7 +23,17 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
             GameSetupScreen(onStartMatch = { navController.navigate(Screen.PhotoSource.route) })
         }
         composable(Screen.PhotoSource.route) {
-            PhotoSourceScreen(onPhotoReady = { navController.navigate(Screen.TerrainPreview.route) })
+            PhotoSourceScreen(onPhotoReady = { navController.navigate(Screen.PhotoCrop.route) })
+        }
+        composable(Screen.PhotoCrop.route) {
+            PhotoCropScreen(
+                onCropConfirmed = {
+                    navController.navigate(Screen.TerrainPreview.route) {
+                        popUpTo(Screen.PhotoCrop.route) { inclusive = true }
+                    }
+                },
+                onRetake = { navController.popBackStack() },
+            )
         }
         composable(Screen.TerrainPreview.route) {
             TerrainPreviewScreen(

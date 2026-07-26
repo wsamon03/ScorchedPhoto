@@ -4,12 +4,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
 import com.scorchedphoto.terrain.PixelBuffer
 import java.io.InputStream
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 private const val WORKING_LONG_EDGE = 720
@@ -17,7 +17,9 @@ private const val WORKING_LONG_EDGE = 720
 /** Bitmap <-> :terrain's platform-agnostic PixelBuffer, kept as the only Android-aware seam. */
 object ImageDownscaler {
 
-    fun loadDownscaledAndCorrected(context: Context, uri: Uri): Bitmap {
+    /** Decodes and EXIF-corrects [uri], but does not crop or do the final long-edge scale -
+     * see [PhotoCropScreen] for the interactive crop step and [cropAndFinish] for finishing it. */
+    fun loadCorrected(context: Context, uri: Uri): Bitmap {
         val (width, height) = readBounds(context, uri)
         val sampleSize = calculateInSampleSize(width, height, WORKING_LONG_EDGE)
 
@@ -26,9 +28,20 @@ object ImageDownscaler {
             ?: error("Unable to decode image at $uri")
 
         val orientation = readExifOrientation(context, uri)
-        val corrected = applyExifOrientation(sampled, orientation)
-        val cropped = cropToScreenAspectRatio(context, corrected)
+        return applyExifOrientation(sampled, orientation)
+    }
 
+    /**
+     * Crops [bitmap] to the user-chosen [cropRect] (in [bitmap]'s own pixel space, produced by
+     * [PhotoCropScreen]/[PhotoCropViewModel]) and scales the result down to [WORKING_LONG_EDGE] -
+     * the same finishing step [loadCorrected]'s output previously always got via an
+     * always-centered crop. [cropRect] is clamped to [bitmap]'s bounds defensively.
+     */
+    fun cropAndFinish(bitmap: Bitmap, cropRect: Rect): Bitmap {
+        val clamped = Rect(cropRect).apply {
+            if (!intersect(0, 0, bitmap.width, bitmap.height)) set(0, 0, bitmap.width, bitmap.height)
+        }
+        val cropped = Bitmap.createBitmap(bitmap, clamped.left, clamped.top, clamped.width(), clamped.height())
         return scaleToLongEdge(cropped, WORKING_LONG_EDGE)
     }
 
@@ -51,41 +64,6 @@ object ImageDownscaler {
             sampleSize *= 2
         }
         return sampleSize
-    }
-
-    /**
-     * Center-crops [bitmap] to the device's own landscape aspect ratio, *before* anything
-     * downstream (terrain segmentation, tank placement across the terrain's width) ever
-     * sees it. Without this, a source photo whose own aspect ratio doesn't match the
-     * landscape-locked game screen's segments a terrain shaped like the photo, not the
-     * screen - and [com.scorchedphoto.app.game.WorldTransform]'s uniform-scale "cover" fit
-     * (see its doc) then has to crop the *rendered* terrain to actually fill the screen,
-     * potentially cutting away a large share of the real playable battlefield - tanks
-     * placed across the terrain's full original width could end up entirely outside the
-     * visible screen. Cropping here instead means the terrain is already shaped like the
-     * screen, so that render-time crop never needs to remove more than a sliver.
-     */
-    private fun cropToScreenAspectRatio(context: Context, bitmap: Bitmap): Bitmap {
-        val metrics = context.resources.displayMetrics
-        val longEdgePx = max(metrics.widthPixels, metrics.heightPixels)
-        val shortEdgePx = min(metrics.widthPixels, metrics.heightPixels)
-        if (shortEdgePx <= 0) return bitmap
-        val targetAspect = longEdgePx.toFloat() / shortEdgePx // width:height, landscape
-        val currentAspect = bitmap.width.toFloat() / bitmap.height
-
-        return when {
-            currentAspect > targetAspect -> {
-                val newWidth = (bitmap.height * targetAspect).roundToInt().coerceIn(1, bitmap.width)
-                val x = (bitmap.width - newWidth) / 2
-                Bitmap.createBitmap(bitmap, x, 0, newWidth, bitmap.height)
-            }
-            currentAspect < targetAspect -> {
-                val newHeight = (bitmap.width / targetAspect).roundToInt().coerceIn(1, bitmap.height)
-                val y = (bitmap.height - newHeight) / 2
-                Bitmap.createBitmap(bitmap, 0, y, bitmap.width, newHeight)
-            }
-            else -> bitmap
-        }
     }
 
     private fun scaleToLongEdge(bitmap: Bitmap, targetLongEdge: Int): Bitmap {
