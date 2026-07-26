@@ -40,8 +40,9 @@ class WhistleOscillator {
         targetAmplitude = if (active) WHISTLE_AMPLITUDE else 0f
     }
 
-    /** Pitch rises as vertical speed shrinks toward zero (the apex) and falls again as it
-     * grows on the way down - see class doc. */
+    /** Pitch rises as vertical speed shrinks toward zero (the apex, highest frequency)
+     * and falls again as it grows on the way down - a doppler-like sweep that tracks the
+     * trajectory's vertical component. */
     fun setFrequencyFromVerticalSpeed(verticalVelocity: Float) {
         val speedFraction = (abs(verticalVelocity) / MAX_SPEED_FOR_PITCH).coerceIn(0f, 1f)
         targetFrequencyHz = MAX_FREQUENCY_HZ - speedFraction * (MAX_FREQUENCY_HZ - MIN_FREQUENCY_HZ)
@@ -123,8 +124,9 @@ class WhistleOscillator {
         private const val WHISTLE_AMPLITUDE = 0.22f
 
         // Per-sample exponential smoothing toward the target frequency/amplitude - avoids
-        // zipper noise/clicks from the target jumping every frame.
-        private const val FREQUENCY_SMOOTHING = 0.0025f
+        // zipper noise/clicks and creates a smooth continuous doppler sweep as the projectile
+        // rises and falls. Higher smoothing creates a more continuous pitch glide.
+        private const val FREQUENCY_SMOOTHING = 0.01f
         private const val AMPLITUDE_SMOOTHING = 0.002f
 
         // Cartoon slide-whistle character: a light reedy overtone plus a whisper of
