@@ -1,6 +1,7 @@
 package com.scorchedphoto.engine
 
 import com.scorchedphoto.engine.combat.DamageCalculator
+import com.scorchedphoto.engine.combat.Weapon
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
@@ -157,7 +158,10 @@ class GameEngine(
                 // primarily a function of horizontal aim precision, matching how a real
                 // shot's accuracy is judged. Each affected tank's own distance to this
                 // point (not snapped to any specific tank's center) drives its damage.
-                touchedTank || p.y >= terrainY -> resolveImpact(p, p.x, terrainY.toFloat())
+                touchedTank || p.y >= terrainY -> {
+                    resolveImpact(p.weapon, p.x, terrainY.toFloat())
+                    pendingEvents += GameEvent.Impact
+                }
                 p.x < -terrain.width || p.x > 2 * terrain.width -> Unit // fizzle, flew off into the void
                 else -> stillFlying += p
             }
@@ -172,22 +176,25 @@ class GameEngine(
     }
 
     /**
-     * Every alive tank within reach takes damage from [DamageCalculator], keyed purely
-     * on its own distance from ([impactX], [impactY]) - a "bullseye" (the tank's central
-     * 20%, see [DamageCalculator]) returns `null` and destroys that tank outright
-     * regardless of current health; everything else is an ordinary amount that only
-     * kills if it actually brings health to 0.
+     * Carves the terrain and damages every alive tank within reach exactly like a real
+     * weapon impact - shared by actual projectile impacts and a dying tank's own death
+     * blast (see [updateAwaitingExplosion]), so the two affect the ground and nearby tanks
+     * the same way. Damage is keyed purely on each tank's own distance from
+     * ([impactX], [impactY]) via [DamageCalculator] - a "bullseye" (the tank's central 20%)
+     * returns `null` and destroys that tank outright regardless of current health;
+     * everything else is an ordinary amount that only kills if it actually brings health
+     * to 0. Callers are responsible for pushing whichever [GameEvent] matches their own
+     * source, since a shell landing and a tank's own death blast sound different.
      */
-    private fun resolveImpact(projectile: Projectile, impactX: Float, impactY: Float) {
-        CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), projectile.weapon.blastRadius.toInt())
-        activeImpactEffects += ImpactEffect(impactX, impactY, projectile.weapon.blastRadius)
-        pendingEvents += GameEvent.Impact
+    private fun resolveImpact(weapon: Weapon, impactX: Float, impactY: Float) {
+        CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt())
+        activeImpactEffects += ImpactEffect(impactX, impactY, weapon.blastRadius)
         for (tank in tanks) {
             if (!tank.alive) continue
-            val damage = DamageCalculator.computeDamage(projectile.weapon, impactX, impactY, tank)
+            val damage = DamageCalculator.computeDamage(weapon, impactX, impactY, tank)
             when {
                 damage == null -> {
-                    if (projectile.weapon.maxDamage > 0) {
+                    if (weapon.maxDamage > 0) {
                         tank.health = 0
                         kill(tank)
                     }
@@ -240,14 +247,19 @@ class GameEngine(
             // it frozen hovering wherever the killing blow found it, even when the blast
             // that killed it also blew away the ground underneath - see startPendingBurns,
             // which waits for tank.falling to clear before starting the death animation.
-            if (!tank.alive && !tank.pendingBurn) continue
+            // An ash pile (see Tank.isAsh) keeps settling the same way for as long as the
+            // match goes on, so a later blast digging out the ground underneath it makes
+            // it fall too, instead of hanging in mid-air over its own crater.
+            if (!tank.alive && !tank.pendingBurn && !tank.isAsh) continue
             val surfaceY = terrain.heightAt(tank.x.toInt()).toFloat()
             if (tank.y < surfaceY - FALL_SETTLE_EPSILON) {
                 tank.falling = true
                 tank.fallVelocity += GRAVITY * dt
                 tank.y = min(tank.y + tank.fallVelocity * dt, surfaceY)
             } else {
-                if (tank.falling) {
+                // Ash has no health left to lose, so a fall never damages/re-kills it -
+                // only a still-alive-or-dying tank's fall does.
+                if (tank.falling && !tank.isAsh) {
                     applyFallDamage(tank)
                 }
                 tank.falling = false
@@ -293,7 +305,10 @@ class GameEngine(
     /**
      * A brief silent beat after the burn animation ends and before the final death
      * explosion fires - see [Tank.awaitingExplosion] - so the explosion reads as its own
-     * distinct event rather than the fire animation's abrupt tail end.
+     * distinct event rather than the fire animation's abrupt tail end. That explosion
+     * carves the terrain and damages nearby tanks exactly like a real weapon impact - see
+     * [resolveImpact]/[WeaponCatalog.TANK_DEATH_EXPLOSION] - so a tank going out can take
+     * others (or its own resting place) with it, same as any other blast would.
      */
     private fun updateAwaitingExplosion(dt: Float) {
         for (tank in tanks) {
@@ -302,7 +317,7 @@ class GameEngine(
             if (tank.awaitingExplosionElapsed >= DEATH_EXPLOSION_PAUSE_SECONDS) {
                 tank.awaitingExplosion = false
                 tank.isAsh = true
-                activeImpactEffects += ImpactEffect(tank.x, tank.y, Tank.RADIUS * 3f)
+                resolveImpact(WeaponCatalog.TANK_DEATH_EXPLOSION, tank.x, tank.y)
                 pendingEvents += GameEvent.TankExploded(tank.id)
             }
         }

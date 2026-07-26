@@ -1,5 +1,7 @@
 package com.scorchedphoto.engine.combat
 
+import com.scorchedphoto.engine.tanks.Tank
+
 object WeaponCatalog {
 
     val STANDARD_SHELL = Weapon(
@@ -34,6 +36,17 @@ object WeaponCatalog {
         blastRadius = 14f,
         maxDamage = 15,
         ammoLimit = null,
+    )
+
+    /** A dying tank's own final blast - see [com.scorchedphoto.engine.GameEngine]'s death
+     * sequence - reusing the same crater-carve/damage machinery a real weapon impact uses
+     * so it affects the ground and nearby tanks the same way. Deliberately excluded from
+     * [all]/[byType]: it's never fired, selected, or ammo-tracked. */
+    val TANK_DEATH_EXPLOSION = Weapon(
+        type = WeaponType.TANK_EXPLOSION,
+        displayName = "Tank Explosion",
+        blastRadius = Tank.RADIUS * 3f,
+        maxDamage = 50,
     )
 
     val all: List<Weapon> = listOf(STANDARD_SHELL, BIG_BERTHA, MIRV, BABY_MISSILE)

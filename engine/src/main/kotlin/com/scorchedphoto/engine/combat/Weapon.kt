@@ -5,6 +5,9 @@ enum class WeaponType {
     BIG_BERTHA,
     MIRV,
     BABY_MISSILE,
+
+    /** Not player-selectable - see [com.scorchedphoto.engine.combat.WeaponCatalog.TANK_DEATH_EXPLOSION]. */
+    TANK_EXPLOSION,
 }
 
 data class Weapon(

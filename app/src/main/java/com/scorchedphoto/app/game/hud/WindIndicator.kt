@@ -30,8 +30,9 @@ import kotlin.math.sin
 private val CIRCLE_DIAMETER = 64.dp
 private val BORDER_STROKE_WIDTH = 3.dp
 private val POLE_STROKE_WIDTH = 2.dp
-private const val OVERLAY_ALPHA = 0.4f
-private const val BORDER_ALPHA = 0.85f
+private const val OVERLAY_ALPHA = 0.5f
+private const val BORDER_ALPHA = 0.75f
+private const val FLAG_ALPHA = 0.75f
 
 // Candidate colors the pole/flag are chosen from by contrast against the average photo
 // color sampled within the circle - see pickMostContrasting.
@@ -156,7 +157,7 @@ private fun DrawScope.drawFlag(
         lineTo(tip.x, tip.y)
         close()
     }
-    drawPath(flagPath, color = flagColor)
+    drawPath(flagPath, color = flagColor.copy(alpha = FLAG_ALPHA))
 }
 
 private const val POLE_TOP_INSET_FRACTION = 0.7f

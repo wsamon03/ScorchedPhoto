@@ -8,8 +8,11 @@ import org.junit.Test
 class WeaponCatalogTest {
 
     @Test
-    fun `catalog has all four weapon types`() {
-        assertEquals(WeaponType.entries.size, WeaponCatalog.all.size)
+    fun `catalog has one weapon per player-selectable type`() {
+        // TANK_EXPLOSION is deliberately excluded - it's a tank's own death blast, never
+        // fired, selected, or ammo-tracked like the other four.
+        val selectableTypes = WeaponType.entries - WeaponType.TANK_EXPLOSION
+        assertEquals(selectableTypes.size, WeaponCatalog.all.size)
     }
 
     @Test
