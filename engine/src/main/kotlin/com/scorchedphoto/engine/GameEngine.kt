@@ -104,14 +104,15 @@ class GameEngine(
         applyTankGravity(dt)
         ageImpactEffects(dt)
         updateBurningTanks(dt)
+        updateAwaitingExplosion(dt)
         startPendingBurns()
 
         // Explosions (from projectiles still flying or still-animating impact flashes)
         // must fully finish before any death animation begins - see startPendingBurns -
-        // and death animations (burning, then its own closing explosion) must fully
-        // finish before the turn can advance or a win can be declared.
+        // and death animations (burning, its pause, then its own closing explosion) must
+        // fully finish before the turn can advance or a win can be declared.
         val explosionsDone = activeProjectiles.isEmpty() && activeImpactEffects.isEmpty()
-        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn }
+        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn || it.awaitingExplosion }
         if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone) {
             finishResolution()
         } else {
@@ -271,6 +272,24 @@ class GameEngine(
             tank.burningElapsed += dt
             if (tank.burningElapsed >= TANK_BURNING_DURATION_SECONDS) {
                 tank.burning = false
+                tank.awaitingExplosion = true
+                tank.awaitingExplosionElapsed = 0f
+            }
+        }
+    }
+
+    /**
+     * A brief silent beat after the burn animation ends and before the final death
+     * explosion fires - see [Tank.awaitingExplosion] - so the explosion reads as its own
+     * distinct event rather than the fire animation's abrupt tail end.
+     */
+    private fun updateAwaitingExplosion(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.awaitingExplosion) continue
+            tank.awaitingExplosionElapsed += dt
+            if (tank.awaitingExplosionElapsed >= DEATH_EXPLOSION_PAUSE_SECONDS) {
+                tank.awaitingExplosion = false
+                tank.isAsh = true
                 activeImpactEffects += ImpactEffect(tank.x, tank.y, Tank.RADIUS * 3f)
                 pendingEvents += GameEvent.TankExploded(tank.id)
             }
@@ -322,6 +341,7 @@ class GameEngine(
         private const val FALL_DAMAGE_MIN_DISTANCE = 20f
         private const val FALL_DAMAGE_PER_PIXEL = 0.4f
         private const val TANK_BURNING_DURATION_SECONDS = 2f
+        private const val DEATH_EXPLOSION_PAUSE_SECONDS = 0.5f
         // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
     }

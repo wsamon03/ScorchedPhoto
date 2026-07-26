@@ -21,6 +21,13 @@ data class Tank(
     var burning: Boolean = false,
     var burningElapsed: Float = 0f,
     var pendingBurn: Boolean = false,
+    // The beat between the burn animation ending and the final death explosion - see
+    // GameEngine.updateAwaitingExplosion.
+    var awaitingExplosion: Boolean = false,
+    var awaitingExplosionElapsed: Float = 0f,
+    // Set once the death explosion fires; permanent for the rest of the match - the
+    // renderer draws an ash pile in place of the tank body from then on.
+    var isAsh: Boolean = false,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {

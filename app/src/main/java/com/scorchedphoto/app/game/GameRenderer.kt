@@ -53,6 +53,8 @@ class GameRenderer(
         strokeCap = Paint.Cap.ROUND
     }
     private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true; alpha = FIRE_ALPHA }
+    private val ashPilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ashSpeckPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val speechBubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val speechBubbleBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.BLACK
@@ -78,6 +80,11 @@ class GameRenderer(
     // A tank's taunt is picked once, the first time it's drawn burning, and kept for the
     // whole burn rather than re-rolled every frame - see burnMessageFor.
     private val burnMessages = mutableMapOf<Int, BurnTaunt>()
+
+    // Each ash pile's speck layout, generated once per tank (deterministically, from its
+    // own id) and reused every frame - see ashSpecksFor. Without caching, redrawing fresh
+    // random specks every frame would flicker.
+    private val ashSpecks = mutableMapOf<Int, List<AshSpeck>>()
 
     // Tracks how long the current tank's turn has been active, purely for the
     // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
@@ -135,6 +142,13 @@ class GameRenderer(
         }
 
         for (tank in tanks) {
+            if (tank.isAsh) {
+                drawAshPile(canvas, tank, transform)
+                continue
+            }
+            // Neither alive nor burning also covers the silent beat between the burn
+            // animation ending and the death explosion (Tank.awaitingExplosion) - nothing
+            // is drawn there on purpose, so the explosion reads as its own distinct event.
             if (!tank.alive && !tank.burning) continue
             val colorOverride = if (tank.id == currentTankId) flashColor else null
             drawTank(canvas, tank, terrain, transform, colorOverride)
@@ -324,6 +338,56 @@ class GameRenderer(
     private fun burnMessageFor(tank: Tank): BurnTaunt =
         burnMessages.getOrPut(tank.id) { BURN_TAUNTS.random().also { onBurnMessageAssigned(tank.id, it.spokenText) } }
 
+    /** What's left where a tank died - a squat mound in the tank's own color muddied
+     * toward grey, with a scatter of black/grey specks on top. Permanent for the rest of
+     * the match (see [Tank.isAsh]). */
+    private fun drawAshPile(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        val pileWidth = halfWidth * ASH_PILE_WIDTH_MULTIPLIER
+        val pileHeight = halfWidth * ASH_PILE_HEIGHT_MULTIPLIER
+
+        ashPilePaint.color = mutedAshColor(tank.color)
+        val pileRect = RectF(cx - pileWidth / 2f, cy - pileHeight, cx + pileWidth / 2f, cy)
+        canvas.drawOval(pileRect, ashPilePaint)
+
+        for (speck in ashSpecksFor(tank)) {
+            ashSpeckPaint.color = if (speck.isBlack) Color.BLACK else Color.DKGRAY
+            val sx = cx + speck.nx * pileWidth / 2f
+            val sy = cy + speck.ny * pileHeight
+            canvas.drawCircle(sx, sy, ASH_SPECK_RADIUS * transform.scale, ashSpeckPaint)
+        }
+    }
+
+    /** Blends [originalColor] toward a muddy grey rather than replacing it outright, so
+     * the ash pile still visibly traces back to which tank it was. Generated once per
+     * tank id and cached - see [ashSpecks] - so the speckle pattern doesn't flicker by
+     * being re-randomized every frame. */
+    private fun ashSpecksFor(tank: Tank): List<AshSpeck> = ashSpecks.getOrPut(tank.id) {
+        val rng = kotlin.random.Random(tank.id * 7919 + 13)
+        (0 until ASH_SPECK_COUNT).map {
+            AshSpeck(
+                nx = rng.nextFloat() * 2f - 1f,
+                ny = -rng.nextFloat() * 0.7f,
+                isBlack = rng.nextBoolean(),
+            )
+        }
+    }
+
+    private fun mutedAshColor(originalColor: Int): Int {
+        fun mute(channel: Int) = (channel + ASH_GREY_LEVEL * 2) / 3
+        return Color.rgb(
+            mute(Color.red(originalColor)),
+            mute(Color.green(originalColor)),
+            mute(Color.blue(originalColor)),
+        )
+    }
+
+    /** One fleck's position within an ash pile, normalized to the pile's own half-width
+     * ([nx] in [-1, 1]) and height ([ny] in [-1, 0], 0 = the pile's base). */
+    private data class AshSpeck(val nx: Float, val ny: Float, val isBlack: Boolean)
+
     private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
         val fm = speechBubbleTextPaint.fontMetrics
         val textHeight = fm.descent - fm.ascent
@@ -404,6 +468,13 @@ class GameRenderer(
         private const val FIRE_FRAME_DURATION_MS = 160L
         private const val FIRE_HEIGHT_MULTIPLIER = 2.2f
         private const val FIRE_ALPHA = (0.75f * 255).toInt()
+
+        private const val ASH_PILE_WIDTH_MULTIPLIER = 1.6f
+        private const val ASH_PILE_HEIGHT_MULTIPLIER = 0.45f
+        private const val ASH_SPECK_COUNT = 10
+        private const val ASH_SPECK_RADIUS = 1.2f
+        // Mostly grey, with a hint of the tank's own color still showing through.
+        private const val ASH_GREY_LEVEL = 130
 
         // spokenText differs from displayText only for the censored line: the bubble
         // still shows the symbols, but TTS reads a natural stand-in instead of literally
