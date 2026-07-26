@@ -48,19 +48,13 @@
         android:fillColor="#FFD700"
         android:pathData="M88,83 Q80,68 86,52 Q92,72 96,45 Q100,75 98,83 Z" />
     <!-- Ash/smoke embers (small dots) -->
-    <circle
-        android:cx="25"
-        android:cy="35"
-        android:r="1.5"
-        android:fillColor="#FFB700" />
-    <circle
-        android:cx="45"
-        android:cy="28"
-        android:r="1"
-        android:fillColor="#FFB700" />
-    <circle
-        android:cx="70"
-        android:cy="32"
-        android:r="1.5"
-        android:fillColor="#FFB700" />
+    <path
+        android:fillColor="#FFB700"
+        android:pathData="M25,33.5 A1.5,1.5 0 1,1 25,36.5 A1.5,1.5 0 1,1 25,33.5" />
+    <path
+        android:fillColor="#FFB700"
+        android:pathData="M45,27 A1,1 0 1,1 45,29 A1,1 0 1,1 45,27" />
+    <path
+        android:fillColor="#FFB700"
+        android:pathData="M70,30.5 A1.5,1.5 0 1,1 70,33.5 A1.5,1.5 0 1,1 70,30.5" />
 </vector>
