@@ -144,7 +144,12 @@ class GameLoopThread(
         if (pendingFireElapsed == null) {
             soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
         }
-        soundController.updateBurningTanks(engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id })
+        val burningTankIds = if (engine.tanks.any { it.burning }) {
+            engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id }
+        } else {
+            emptySet()
+        }
+        soundController.updateBurningTanks(burningTankIds)
     }
 
     /** Kicks off a shot: picks a random pre-fire taunt for [tankId], hands it to

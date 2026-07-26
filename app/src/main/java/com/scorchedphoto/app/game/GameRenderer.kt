@@ -67,6 +67,16 @@ class GameRenderer(
         textAlign = Paint.Align.CENTER
     }
 
+    // Reused every call rather than allocated fresh - drawSpeechBubble runs every frame for
+    // the full ~2s duration of every pre-fire/death taunt, so this is a hot path. Safe to
+    // share: each call fully finishes drawing (paths are consumed synchronously by
+    // canvas.drawPath) before the next call - possibly for a second burning tank - reuses them.
+    private val speechBubbleFontMetrics = Paint.FontMetrics()
+    private val speechBubbleRect = RectF()
+    private val speechBubblePath = Path()
+    private val speechBubbleTailFillPath = Path()
+    private val speechBubbleTailOutlinePath = Path()
+
     private val srcRect = photo?.let { Rect(0, 0, it.width, it.height) }
 
     // Decoded once and reused every frame - see assets/fire/, extracted from the source
@@ -85,6 +95,13 @@ class GameRenderer(
     // own id) and reused every frame - see ashSpecksFor. Without caching, redrawing fresh
     // random specks every frame would flicker.
     private val ashSpecks = mutableMapOf<Int, List<AshSpeck>>()
+
+    // Each ash pile's mound RectF objects, created once per tank and reused every frame - see
+    // ashMoundRectsFor. Unlike ashSpecks these are screen-space (built from cx/cy, which are
+    // WorldTransform-derived), and the canvas can resize mid-match (configChanges handles
+    // rotation without recreating the Activity), so only the objects are cached - their
+    // bounds are still updated via .set(...) every frame in drawAshPile.
+    private val ashMoundRects = mutableMapOf<Int, List<RectF>>()
 
     // Tracks how long the current tank's turn has been active, purely for the
     // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
@@ -255,20 +272,26 @@ class GameRenderer(
             val fraction = i.toFloat() / steps
             val r = radius * fraction
 
-            val (red, green, blue) = when {
+            val red = 255
+            val green: Int
+            val blue: Int
+            when {
                 fraction > 0.66f -> {
                     // Red to yellow: interpolate green from 0 to 255
                     val colorFraction = (fraction - 0.66f) / 0.34f
-                    Triple(255, (colorFraction * 200).toInt(), 0)
+                    green = (colorFraction * 200).toInt()
+                    blue = 0
                 }
                 fraction > 0.33f -> {
                     // Yellow to white: interpolate green and blue from yellow towards white
                     val colorFraction = (fraction - 0.33f) / 0.33f
-                    Triple(255, (200 + colorFraction * 55).toInt(), (colorFraction * 55).toInt())
+                    green = (200 + colorFraction * 55).toInt()
+                    blue = (colorFraction * 55).toInt()
                 }
                 else -> {
                     // White center, fading to yellow: already white
-                    Triple(255, 255, 255)
+                    green = 255
+                    blue = 255
                 }
             }
 
@@ -367,11 +390,14 @@ class GameRenderer(
         ashPilePaint.color = mutedAshColor(tank.color)
         // A wide, short base mound with progressively narrower, taller ones stacked
         // (overlapping) on top of it - a single flat oval read as a puddle, not a heap.
-        for ((widthFraction, heightFraction, riseFraction) in ASH_MOUND_LAYERS) {
+        val moundRects = ashMoundRectsFor(tank.id)
+        for ((index, layer) in ASH_MOUND_LAYERS.withIndex()) {
+            val (widthFraction, heightFraction, riseFraction) = layer
             val moundWidth = pileWidth * widthFraction
             val moundHeight = pileHeight * heightFraction
             val moundBottom = cy - pileHeight * riseFraction
-            val moundRect = RectF(cx - moundWidth / 2f, moundBottom - moundHeight, cx + moundWidth / 2f, moundBottom)
+            val moundRect = moundRects[index]
+            moundRect.set(cx - moundWidth / 2f, moundBottom - moundHeight, cx + moundWidth / 2f, moundBottom)
             canvas.drawOval(moundRect, ashPilePaint)
         }
 
@@ -398,6 +424,12 @@ class GameRenderer(
         }
     }
 
+    /** This tank's 3 mound [RectF]s - created once per tank id and cached, since allocating
+     * fresh ones every frame for the rest of the match (ash piles never animate) is pure
+     * waste. See [ashMoundRects] doc for why only the objects, not their bounds, are cached. */
+    private fun ashMoundRectsFor(tankId: Int): List<RectF> =
+        ashMoundRects.getOrPut(tankId) { ASH_MOUND_LAYERS.map { RectF() } }
+
     private fun mutedAshColor(originalColor: Int): Int {
         fun mute(channel: Int) = (channel + ASH_GREY_LEVEL * 2) / 3
         return Color.rgb(
@@ -412,33 +444,33 @@ class GameRenderer(
     private data class AshSpeck(val nx: Float, val ny: Float, val isBlack: Boolean)
 
     private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
-        val fm = speechBubbleTextPaint.fontMetrics
+        speechBubbleTextPaint.getFontMetrics(speechBubbleFontMetrics)
+        val fm = speechBubbleFontMetrics
         val textHeight = fm.descent - fm.ascent
         val boxWidth = speechBubbleTextPaint.measureText(message) + BUBBLE_PADDING_X * 2f
         val boxHeight = textHeight + BUBBLE_PADDING_Y * 2f
         val boxBottom = tailTipY - BUBBLE_TAIL_HEIGHT
         val boxTop = boxBottom - boxHeight
-        val rect = RectF(cx - boxWidth / 2f, boxTop, cx + boxWidth / 2f, boxBottom)
+        speechBubbleRect.set(cx - boxWidth / 2f, boxTop, cx + boxWidth / 2f, boxBottom)
 
-        val bubblePath = Path().apply { addRoundRect(rect, BUBBLE_CORNER_RADIUS, BUBBLE_CORNER_RADIUS, Path.Direction.CW) }
-        val tailFill = Path().apply {
-            moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
-            lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
-            lineTo(cx, tailTipY)
-            close()
-        }
+        speechBubblePath.reset()
+        speechBubblePath.addRoundRect(speechBubbleRect, BUBBLE_CORNER_RADIUS, BUBBLE_CORNER_RADIUS, Path.Direction.CW)
+        speechBubbleTailFillPath.reset()
+        speechBubbleTailFillPath.moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+        speechBubbleTailFillPath.lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+        speechBubbleTailFillPath.lineTo(cx, tailTipY)
+        speechBubbleTailFillPath.close()
         // Open path (no closing top edge) so the tail's outline doesn't draw a stray
         // line across the bubble's own bottom border where the two shapes meet.
-        val tailOutline = Path().apply {
-            moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
-            lineTo(cx, tailTipY)
-            lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
-        }
+        speechBubbleTailOutlinePath.reset()
+        speechBubbleTailOutlinePath.moveTo(cx - BUBBLE_TAIL_WIDTH / 2f, boxBottom)
+        speechBubbleTailOutlinePath.lineTo(cx, tailTipY)
+        speechBubbleTailOutlinePath.lineTo(cx + BUBBLE_TAIL_WIDTH / 2f, boxBottom)
 
-        canvas.drawPath(tailFill, speechBubblePaint)
-        canvas.drawPath(bubblePath, speechBubblePaint)
-        canvas.drawPath(bubblePath, speechBubbleBorderPaint)
-        canvas.drawPath(tailOutline, speechBubbleBorderPaint)
+        canvas.drawPath(speechBubbleTailFillPath, speechBubblePaint)
+        canvas.drawPath(speechBubblePath, speechBubblePaint)
+        canvas.drawPath(speechBubblePath, speechBubbleBorderPaint)
+        canvas.drawPath(speechBubbleTailOutlinePath, speechBubbleBorderPaint)
 
         val baselineY = (boxTop + boxBottom) / 2f - (fm.ascent + fm.descent) / 2f
         canvas.drawText(message, cx, baselineY, speechBubbleTextPaint)

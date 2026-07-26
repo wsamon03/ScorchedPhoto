@@ -5,6 +5,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,18 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
     private var counter = 0
     private val pending = ArrayDeque<SpeakRequest>() // guarded by lock
 
+    // enqueue() makes several synchronous TextToSpeech calls, each a Binder round-trip to the
+    // separate TTS engine process (setVoice in particular is known to be expensive on real
+    // devices) - speak() is called from GameLoopThread's render thread (once per shot, once
+    // per death, the latter while the Surface canvas is locked), so that work must never run
+    // on the caller's thread. A single-thread executor serializes every enqueue() call (from
+    // speak() and from the init-flush below) in submission order, which is what preserves the
+    // "voice+pitch+rate+speak as one atomic unit" guarantee this class has always promised -
+    // just moved off the caller's thread instead of behind a lock held on it.
+    private val speechExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "DeathLineSpeaker-TTS").apply { isDaemon = true }
+    }
+
     private val _availableVoices = MutableStateFlow(listOf(VoiceOption.SYSTEM_DEFAULT))
 
     /** Voices this device's TTS engine actually has, ready to use - starts as just
@@ -39,9 +52,12 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
             ready = status == TextToSpeech.SUCCESS
             if (ready) {
                 _availableVoices.value = buildVoiceOptions()
-                pending.forEach { enqueue(it.text, it.voiceId, it.pitch, it.speechRate) }
+                val toFlush = pending.toList()
+                pending.clear()
+                speechExecutor.execute { toFlush.forEach { enqueue(it.text, it.voiceId, it.pitch, it.speechRate) } }
+            } else {
+                pending.clear()
             }
-            pending.clear()
         }
     }
 
@@ -49,14 +65,18 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
      * queues until the engine reports ready. */
     fun speak(text: String, voiceId: String?, pitch: Float, speechRate: Float) {
         synchronized(lock) {
-            if (ready) enqueue(text, voiceId, pitch, speechRate) else pending.addLast(SpeakRequest(text, voiceId, pitch, speechRate))
+            if (ready) {
+                speechExecutor.execute { enqueue(text, voiceId, pitch, speechRate) }
+            } else {
+                pending.addLast(SpeakRequest(text, voiceId, pitch, speechRate))
+            }
         }
     }
 
-    // Caller holds `lock`: voice+pitch+rate+speak are set as one atomic unit on the single
-    // shared engine, since two tanks can die in the same tick (one blast can ignite
-    // multiple) and these are shared, per-call state on `tts` - without the lock a second
-    // call's voice/pitch could land between the first call's and its own speak().
+    // Only ever invoked on speechExecutor, which is single-threaded - every call (from speak()
+    // or the init-flush above) is therefore automatically serialized in submission order, so
+    // voice+pitch+rate+speak land on the shared `tts` engine as one atomic unit even when two
+    // tanks die in the same tick (one blast can ignite multiple).
     private fun enqueue(text: String, voiceId: String?, pitch: Float, speechRate: Float) {
         val resolved = voiceId?.let { id -> tts.voices?.find { it.name == id } } ?: tts.defaultVoice
         resolved?.let { tts.voice = it }

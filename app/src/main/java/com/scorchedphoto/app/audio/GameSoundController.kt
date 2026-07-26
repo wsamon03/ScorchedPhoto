@@ -84,6 +84,7 @@ class GameSoundController @Inject constructor(@ApplicationContext context: Conte
      * burning tank's looping hiss-and-crackle stream and stops it the instant that tank's
      * burn ends. */
     fun updateBurningTanks(burningTankIds: Set<Int>) {
+        if (burningTankIds.isEmpty() && burningStreams.isEmpty()) return
         val toStop = burningStreams.keys - burningTankIds
         for (tankId in toStop) {
             burningStreams.remove(tankId)?.let { soundPool.stop(it) }
