@@ -11,8 +11,8 @@ import kotlin.random.Random
 /**
  * Real-time synthesizer for the in-flight projectile whistle, styled after a cartoon slide
  * (swanee) whistle rather than a lab-tone sine: the fundamental is mixed with a touch of
- * third-harmonic content for a reedier timbre, a light breath-noise bed, and a gentle
- * vibrato wobble - see [runLoop]. A pre-baked clip can't work for the pitch itself, though:
+ * third-harmonic content for a reedier timbre and a light breath-noise bed - see [runLoop].
+ * A pre-baked clip can't work for the pitch itself, though:
  * flight duration and apex timing vary every shot (power, angle, wind, terrain), so the
  * only way for it to actually track "rising to the apex, falling to the explosion" is to
  * drive the oscillator directly off the projectile's live vertical speed, frame by frame -
@@ -78,7 +78,6 @@ class WhistleOscillator {
             .build()
 
         var phase = 0.0
-        var vibratoPhase = 0.0
         var currentFrequency = targetFrequencyHz
         var currentAmplitude = 0f
         val rng = Random(System.nanoTime())
@@ -91,11 +90,7 @@ class WhistleOscillator {
                     currentFrequency += (targetFrequencyHz - currentFrequency) * FREQUENCY_SMOOTHING
                     currentAmplitude += (targetAmplitude - currentAmplitude) * AMPLITUDE_SMOOTHING
 
-                    vibratoPhase += 2.0 * PI * VIBRATO_RATE_HZ / SAMPLE_RATE_HZ
-                    if (vibratoPhase > 2.0 * PI) vibratoPhase -= 2.0 * PI
-                    val vibrato = 1.0 + VIBRATO_DEPTH * sin(vibratoPhase)
-
-                    phase += 2.0 * PI * (currentFrequency * vibrato) / SAMPLE_RATE_HZ
+                    phase += 2.0 * PI * currentFrequency / SAMPLE_RATE_HZ
                     if (phase > 2.0 * PI) phase -= 2.0 * PI
 
                     // Fundamental + a touch of the third harmonic for a reedy, non-pure
@@ -132,12 +127,10 @@ class WhistleOscillator {
         private const val FREQUENCY_SMOOTHING = 0.0025f
         private const val AMPLITUDE_SMOOTHING = 0.002f
 
-        // Cartoon slide-whistle character: a light reedy overtone, a whisper of breath
-        // noise, and a gentle wobble - see runLoop.
+        // Cartoon slide-whistle character: a light reedy overtone plus a whisper of
+        // breath noise - see runLoop.
         private const val THIRD_HARMONIC_MIX = 0.22f
         private const val BREATH_NOISE_MIX = 0.06f
         private const val WAVE_NORMALIZATION = 1f / (1f + THIRD_HARMONIC_MIX + BREATH_NOISE_MIX)
-        private const val VIBRATO_RATE_HZ = 7f
-        private const val VIBRATO_DEPTH = 0.025
     }
 }

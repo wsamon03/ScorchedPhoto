@@ -35,5 +35,6 @@ data class GameUiState(
     val weapons: List<WeaponHudInfo> = emptyList(),
     val tanks: List<TankHudInfo> = emptyList(),
     val windVelocity: Float = 0f,
+    val windMaxMagnitude: Float = 15f,
     val winnerOwnerId: Int? = null,
 )

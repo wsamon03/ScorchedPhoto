@@ -349,8 +349,15 @@ class GameRenderer(
         val pileHeight = halfWidth * ASH_PILE_HEIGHT_MULTIPLIER
 
         ashPilePaint.color = mutedAshColor(tank.color)
-        val pileRect = RectF(cx - pileWidth / 2f, cy - pileHeight, cx + pileWidth / 2f, cy)
-        canvas.drawOval(pileRect, ashPilePaint)
+        // A wide, short base mound with progressively narrower, taller ones stacked
+        // (overlapping) on top of it - a single flat oval read as a puddle, not a heap.
+        for ((widthFraction, heightFraction, riseFraction) in ASH_MOUND_LAYERS) {
+            val moundWidth = pileWidth * widthFraction
+            val moundHeight = pileHeight * heightFraction
+            val moundBottom = cy - pileHeight * riseFraction
+            val moundRect = RectF(cx - moundWidth / 2f, moundBottom - moundHeight, cx + moundWidth / 2f, moundBottom)
+            canvas.drawOval(moundRect, ashPilePaint)
+        }
 
         for (speck in ashSpecksFor(tank)) {
             ashSpeckPaint.color = if (speck.isBlack) Color.BLACK else Color.DKGRAY
@@ -470,7 +477,15 @@ class GameRenderer(
         private const val FIRE_ALPHA = (0.75f * 255).toInt()
 
         private const val ASH_PILE_WIDTH_MULTIPLIER = 1.6f
-        private const val ASH_PILE_HEIGHT_MULTIPLIER = 0.45f
+        private const val ASH_PILE_HEIGHT_MULTIPLIER = 0.7f
+        // Each mound layer, base first: (width fraction of the pile's full width, height
+        // fraction of the pile's full height, how far up from the base its bottom edge
+        // sits, as a fraction of the pile's full height) - see drawAshPile.
+        private val ASH_MOUND_LAYERS = listOf(
+            Triple(1f, 0.5f, 0f),
+            Triple(0.65f, 0.65f, 0.28f),
+            Triple(0.35f, 0.8f, 0.5f),
+        )
         private const val ASH_SPECK_COUNT = 10
         private const val ASH_SPECK_RADIUS = 1.2f
         // Mostly grey, with a hint of the tank's own color still showing through.

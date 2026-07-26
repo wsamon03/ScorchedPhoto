@@ -1,5 +1,6 @@
 package com.scorchedphoto.app.game.hud
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -41,7 +42,12 @@ private data class FiredShotReadout(
 )
 
 @Composable
-fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier: Modifier = Modifier) {
+fun HudOverlay(
+    uiState: GameUiState,
+    onCommand: (GameCommand) -> Unit,
+    photo: Bitmap?,
+    modifier: Modifier = Modifier,
+) {
     var canvasSizePx by remember { mutableStateOf(IntSize.Zero) }
     val powerChargeState = rememberPowerChargeState()
     PowerChargeAnimator(powerChargeState, maxPower = uiState.currentMaxPower)
@@ -124,6 +130,11 @@ fun HudOverlay(uiState: GameUiState, onCommand: (GameCommand) -> Unit, modifier:
         )
         WindIndicator(
             windVelocity = uiState.windVelocity,
+            windMaxMagnitude = uiState.windMaxMagnitude,
+            photo = photo,
+            transform = transform,
+            terrainWidth = uiState.terrainWidth,
+            terrainHeight = uiState.terrainHeight,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(8.dp),

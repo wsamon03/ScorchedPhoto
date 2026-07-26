@@ -74,7 +74,7 @@ fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel
                 onReady = { acknowledgedTankId = uiState.currentTankId },
             )
         } else {
-            HudOverlay(uiState = uiState, onCommand = viewModel::submitCommand)
+            HudOverlay(uiState = uiState, onCommand = viewModel::submitCommand, photo = viewModel.backgroundPhoto)
         }
     }
 }

@@ -126,6 +126,7 @@ class GameViewModel @Inject constructor(
             },
             tanks = engine.tanks.map { TankHudInfo(it.id, it.name, it.color, it.health, it.alive) },
             windVelocity = engine.wind.velocity,
+            windMaxMagnitude = engine.maxWindMagnitude,
             winnerOwnerId = winResult?.winningOwnerId,
         )
     }

@@ -30,7 +30,7 @@ class GameEngine(
     val terrain: HeightMap,
     val tanks: List<Tank>,
     val wind: Wind = Wind(),
-    private val maxWindMagnitude: Float = 15f,
+    val maxWindMagnitude: Float = 15f,
     private val rng: Random = Random.Default,
 ) {
     private val turnManager = TurnManager(tanks)
