@@ -4,57 +4,32 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Terrain silhouette -->
+    <!-- Original mountain landscape -->
     <path
-        android:fillColor="#2C2C2C"
-        android:pathData="M0,100 L20,75 L35,88 L50,60 L68,80 L88,55 L108,90 L108,108 L0,108 Z" />
-    <!-- Dark flames/glow (background) -->
-    <path
-        android:fillColor="#FF6B00"
-        android:pathData="M15,85 Q10,75 15,60 Q18,70 20,55 Q25,70 22,85 Z" />
+        android:fillColor="@color/launcher_foreground"
+        android:pathData="M20,80 L38,50 L50,66 L66,36 L88,80 Z" />
+    <!-- Flames on the left mountain peak -->
     <path
         android:fillColor="#FF6B00"
-        android:pathData="M35,90 Q28,75 32,55 Q38,70 40,50 Q45,72 42,90 Z" />
+        android:pathData="M32,62 Q28,58 32,50 Q35,58 36,48 Q40,62 38,65 Z" />
+    <path
+        android:fillColor="#FF9500"
+        android:pathData="M34,64 Q30,60 34,52 Q37,60 38,50 Q41,64 40,66 Z" />
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M36,65 Q33,62 36,56 Q39,62 40,54 Q42,65 41,66 Z" />
+    <!-- Flames on the right mountain peak -->
     <path
         android:fillColor="#FF6B00"
-        android:pathData="M58,85 Q50,70 55,50 Q62,70 65,45 Q72,72 68,85 Z" />
-    <path
-        android:fillColor="#FF6B00"
-        android:pathData="M82,88 Q75,72 80,55 Q87,75 90,48 Q96,75 93,88 Z" />
-    <!-- Medium flames -->
+        android:pathData="M80,50 Q76,46 80,38 Q83,46 84,36 Q88,50 86,53 Z" />
     <path
         android:fillColor="#FF9500"
-        android:pathData="M18,80 Q12,68 18,52 Q22,68 24,48 Q28,72 25,80 Z" />
-    <path
-        android:fillColor="#FF9500"
-        android:pathData="M38,88 Q32,70 36,50 Q42,68 45,45 Q50,75 46,88 Z" />
-    <path
-        android:fillColor="#FF9500"
-        android:pathData="M62,82 Q54,65 60,45 Q66,68 70,38 Q76,72 71,82 Z" />
-    <path
-        android:fillColor="#FF9500"
-        android:pathData="M86,85 Q78,65 84,50 Q90,72 94,42 Q100,75 96,85 Z" />
-    <!-- Bright inner flames -->
+        android:pathData="M82,52 Q78,48 82,40 Q85,48 86,38 Q90,52 88,54 Z" />
     <path
         android:fillColor="#FFD700"
-        android:pathData="M20,78 Q15,68 20,55 Q24,68 26,52 Q29,72 27,78 Z" />
+        android:pathData="M84,53 Q81,50 84,44 Q87,50 88,42 Q90,53 89,54 Z" />
+    <!-- Original sun/moon circle -->
     <path
-        android:fillColor="#FFD700"
-        android:pathData="M40,85 Q34,72 38,55 Q43,70 46,50 Q50,75 48,85 Z" />
-    <path
-        android:fillColor="#FFD700"
-        android:pathData="M64,80 Q58,68 62,50 Q68,70 71,45 Q75,73 72,80 Z" />
-    <path
-        android:fillColor="#FFD700"
-        android:pathData="M88,83 Q80,68 86,52 Q92,72 96,45 Q100,75 98,83 Z" />
-    <!-- Ash/smoke embers (small dots) -->
-    <path
-        android:fillColor="#FFB700"
-        android:pathData="M25,33.5 A1.5,1.5 0 1,1 25,36.5 A1.5,1.5 0 1,1 25,33.5" />
-    <path
-        android:fillColor="#FFB700"
-        android:pathData="M45,27 A1,1 0 1,1 45,29 A1,1 0 1,1 45,27" />
-    <path
-        android:fillColor="#FFB700"
-        android:pathData="M70,30.5 A1.5,1.5 0 1,1 70,33.5 A1.5,1.5 0 1,1 70,30.5" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,28 m-8,0 a8,8 0,1 1,16 0 a8,8 0,1 1,-16 0" />
 </vector>
