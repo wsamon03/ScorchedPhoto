@@ -11,37 +11,37 @@
     <!-- Flames at the base of the landscape on the left side -->
     <path
         android:fillColor="#FF6B00"
-        android:pathData="M28,80 Q24,75 28,68 Q31,75 32,66 Q36,80 34,82 Z" />
+        android:pathData="M25,85 Q18,78 22,62 Q26,78 28,60 Q34,85 31,88 Z" />
     <path
         android:fillColor="#FF9500"
-        android:pathData="M30,82 Q27,77 30,70 Q33,77 34,68 Q37,82 36,84 Z" />
+        android:pathData="M28,87 Q22,80 26,64 Q30,80 32,62 Q37,87 35,90 Z" />
     <path
         android:fillColor="#FFD700"
-        android:pathData="M32,83 Q29,79 32,73 Q35,79 36,71 Q38,83 37,84 Z" />
+        android:pathData="M31,88 Q26,82 30,68 Q34,82 36,66 Q40,88 38,90 Z" />
+    <!-- Flames at the base of the landscape in the middle -->
+    <path
+        android:fillColor="#FF6B00"
+        android:pathData="M50,85 Q44,76 48,60 Q52,76 54,58 Q60,85 57,90 Z" />
+    <path
+        android:fillColor="#FF9500"
+        android:pathData="M52,87 Q47,78 51,62 Q55,78 57,60 Q62,87 60,92 Z" />
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M54,89 Q50,81 54,66 Q58,81 60,64 Q64,89 62,93 Z" />
     <!-- Flames at the base of the landscape on the right side -->
     <path
         android:fillColor="#FF6B00"
-        android:pathData="M82,80 Q78,75 82,68 Q85,75 86,66 Q90,80 88,82 Z" />
+        android:pathData="M78,85 Q72,78 76,62 Q80,78 82,60 Q88,85 85,88 Z" />
     <path
         android:fillColor="#FF9500"
-        android:pathData="M84,82 Q81,77 84,70 Q87,77 88,68 Q91,82 90,84 Z" />
+        android:pathData="M80,87 Q75,80 79,64 Q83,80 85,62 Q90,87 88,90 Z" />
     <path
         android:fillColor="#FFD700"
-        android:pathData="M86,83 Q83,79 86,73 Q89,79 90,71 Q92,83 91,84 Z" />
-    <!-- Red tank body -->
+        android:pathData="M82,88 Q78,82 82,68 Q86,82 88,66 Q92,88 90,90 Z" />
+    <!-- Red tank body (connected turret, barrel, and body) -->
     <path
         android:fillColor="#CC0000"
-        android:pathData="M44,68 L64,68 L65,72 L43,72 Z" />
-    <!-- Tank turret -->
-    <path
-        android:fillColor="#DD0000"
-        android:pathData="M54,58 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0" />
-    <!-- Tank barrel pointing diagonally -->
-    <path
-        android:strokeColor="#BB0000"
-        android:strokeWidth="1.5"
-        android:strokeLineCap="round"
-        android:pathData="M50,56 L38,44" />
+        android:pathData="M42,70 L66,70 L68,76 L40,76 Z M54,58 m-7,0 a7,7 0 1,1 14,0 a7,7 0 1,1 -14,0 M48,53 L36,40 L38,38 L50,51 Z" />
     <!-- Original sun/moon circle -->
     <path
         android:fillColor="#FFFFFF"
