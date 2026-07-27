@@ -3,6 +3,7 @@ package com.scorchedphoto.engine
 import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
+import com.scorchedphoto.engine.physics.GRAVITY
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.testTank
@@ -438,5 +439,175 @@ class GameEngineTest {
         assertNotNull("expected a tie result instead of a stalled match with no winner", result)
         assertEquals(setOf(1, 2), result?.winningOwnerIds?.toSet())
         assertEquals(setOf(1, 2), result?.winningTankIds?.toSet())
+    }
+
+    @Test
+    fun `WallType and CeilingType NONE preserve the existing far-off fizzle`() {
+        // Shooter starts right at x=0 in a narrow (width=50) map; firing up-and-left at a
+        // shallow-enough arc crosses the -width fizzle bound (-50) while still well elevated
+        // above the flat ground (long before the parabola would naturally return to ground
+        // height), so this exercises the "flew off into the void" branch specifically,
+        // distinct from an ordinary ground impact.
+        val terrain = flatTerrain(width = 50, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 0f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, rng = Random(1))
+        shooter.angleDeg = 135f
+        shooter.power = 50f
+        engine.fire()
+
+        var ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the projectile to fizzle out rather than linger", engine.projectiles.isEmpty())
+        assertTrue("fizzle should not register as a scored impact", engine.drainEvents().none { it == GameEvent.Impact })
+        assertTrue("fizzle should leave no impact effect", engine.impactEffects.isEmpty())
+        assertTrue("fizzle should leave no bounce effect", engine.bounceEffects.isEmpty())
+    }
+
+    @Test
+    fun `wall type Reflective bounces a projectile back at matching speed`() {
+        val terrain = flatTerrain(width = 200, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, wallType = EdgeType.REFLECTIVE, rng = Random(1))
+        shooter.angleDeg = 135f
+        shooter.power = 50f
+        engine.fire()
+
+        var vxBeforeBounce = 0f
+        var bounced = false
+        var ticks = 0
+        while (!bounced && ticks < 200) {
+            vxBeforeBounce = engine.projectiles.first().vx
+            engine.tick(1f / 60f)
+            if (engine.projectiles.first().vx > 0f) bounced = true
+            ticks++
+        }
+
+        assertTrue("expected the wall to reflect the projectile", bounced)
+        val p = engine.projectiles.first()
+        // No wind, so vx is unchanged by stepProjectile itself - the reflection is the only
+        // thing that can flip its sign, and REFLECTIVE's 1.0 retention keeps the magnitude.
+        assertEquals(-vxBeforeBounce, p.vx, 1f)
+        assertEquals("expected the projectile clamped exactly onto the wall (x=0)", 0f, p.x, 0.01f)
+    }
+
+    @Test
+    fun `ceiling type Reflective bounces a projectile back down at matching speed`() {
+        val terrain = flatTerrain(width = 1000, groundY = 100)
+        val shooter = testTank(id = 1, ownerId = 1, x = 500f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, ceilingType = EdgeType.REFLECTIVE, rng = Random(1))
+        shooter.angleDeg = 90f
+        shooter.power = 50f
+        engine.fire()
+
+        var vyBeforeBounce = 0f
+        var bounced = false
+        var ticks = 0
+        while (!bounced && ticks < 200) {
+            vyBeforeBounce = engine.projectiles.first().vy
+            engine.tick(1f / 60f)
+            if (engine.projectiles.first().vy > 0f) bounced = true
+            ticks++
+        }
+
+        assertTrue("expected the ceiling to reflect the projectile downward", bounced)
+        val p = engine.projectiles.first()
+        // Unlike vx, vy always gets one more tick's worth of gravity applied by stepProjectile
+        // before the reflection check runs, so the expected post-bounce value accounts for it.
+        val vyEnteringBounceTick = vyBeforeBounce + GRAVITY * (1f / 60f)
+        assertEquals(-vyEnteringBounceTick, p.vy, 1f)
+        assertEquals("expected the projectile clamped exactly onto the ceiling (y=0)", 0f, p.y, 0.01f)
+    }
+
+    @Test
+    fun `wall type Blast Steel detonates at the wall, damaging a nearby tank without carving distant terrain`() {
+        val terrain = flatTerrain(width = 200, groundY = 500)
+        // A 45-degree arc whose unobstructed range (~95px) is just past the shooter's 90px
+        // distance to the wall, so it crosses x=0 just before it would naturally land - still
+        // close to ground level (a few px of clearance) rather than deep mid-flight, keeping
+        // the detonation point within the bystander's blast reach.
+        val shooter = testTank(id = 1, ownerId = 1, x = 90f)
+        val bystander = testTank(id = 2, ownerId = 2, x = 10f, health = Tank.MAX_HEALTH)
+        val engine = GameEngine(terrain, listOf(shooter, bystander), maxWindMagnitude = 0f, wallType = EdgeType.BLAST_STEEL, rng = Random(1))
+        shooter.angleDeg = 135f // up-and-left, toward the wall at x=0
+        shooter.power = 30f
+
+        val distantColumn = 190
+        val distantGroundBefore = terrain.groundY[distantColumn]
+
+        engine.fire()
+        var ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the blast-steel wall to detonate the projectile", engine.projectiles.isEmpty())
+        assertTrue("expected the nearby bystander to take blast damage", bystander.health < Tank.MAX_HEALTH)
+        assertEquals(
+            "expected terrain far from the wall to be untouched",
+            distantGroundBefore,
+            terrain.groundY[distantColumn],
+        )
+    }
+
+    @Test
+    fun `wall type Wrap teleports the projectile to the opposite edge with velocity unchanged`() {
+        val terrain = flatTerrain(width = 200, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, wallType = EdgeType.WRAP, rng = Random(1))
+        shooter.angleDeg = 135f
+        shooter.power = 50f
+        engine.fire()
+
+        val vxOriginal = engine.projectiles.first().vx
+        var wrapped = false
+        var ticks = 0
+        while (!wrapped && ticks < 200) {
+            val before = engine.projectiles.first().x
+            engine.tick(1f / 60f)
+            val after = engine.projectiles.first().x
+            if (after - before > 100f) wrapped = true
+            ticks++
+        }
+
+        assertTrue("expected the projectile to wrap to the opposite wall", wrapped)
+        val p = engine.projectiles.first()
+        assertEquals(200f, p.x, 0.01f)
+        // No wind, so vx is untouched by ordinary physics too - confirms WRAP itself never
+        // negates/scales velocity the way a bounce type would.
+        assertEquals(vxOriginal, p.vx, 0.01f)
+    }
+
+    @Test
+    fun `ceiling type Wrap teleports the projectile to the bottom edge with velocity unchanged`() {
+        val terrain = flatTerrain(width = 1000, groundY = 100)
+        val shooter = testTank(id = 1, ownerId = 1, x = 500f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, ceilingType = EdgeType.WRAP, rng = Random(1))
+        shooter.angleDeg = 90f
+        shooter.power = 50f
+        engine.fire()
+
+        var vyJustBefore = 0f
+        var wrapped = false
+        var ticks = 0
+        while (!wrapped && ticks < 200) {
+            vyJustBefore = engine.projectiles.first().vy
+            val before = engine.projectiles.first().y
+            engine.tick(1f / 60f)
+            val after = engine.projectiles.first().y
+            if (after - before > 100f) wrapped = true
+            ticks++
+        }
+
+        assertTrue("expected the projectile to wrap to the bottom edge", wrapped)
+        val p = engine.projectiles.first()
+        assertEquals(300f, p.y, 0.01f)
+        // WRAP leaves velocity untouched aside from this tick's ordinary gravity increment -
+        // confirms it wasn't negated/scaled like a bounce would be.
+        assertEquals(vyJustBefore + GRAVITY * (1f / 60f), p.vy, 0.5f)
     }
 }

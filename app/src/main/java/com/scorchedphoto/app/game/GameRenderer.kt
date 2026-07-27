@@ -9,6 +9,8 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import com.scorchedphoto.engine.BounceEffect
+import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.ImpactEffect
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.physics.Projectile
@@ -58,6 +60,7 @@ class GameRenderer(
     }
     private val projectilePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
     private val impactPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(255, 255, 160, 40) }
+    private val edgeMarkPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val horizonPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         style = Paint.Style.STROKE
@@ -95,6 +98,12 @@ class GameRenderer(
 
     // Reused every frame for the same reason - see the loop above.
     private val backgroundRect = RectF()
+
+    // Reused across every bounce-mark draw call rather than allocated fresh - see
+    // drawPaddedMark/drawSpringMark, which run every frame for the ~0.25s life of each
+    // wall/ceiling bounce effect.
+    private val edgeMarkRect = RectF()
+    private val edgeMarkPath = Path()
 
     // Each tank's body Path, created once per tank id and reused every frame (rebuilt via
     // .reset() since a tank's cx/cy/slope-rotation genuinely can change frame to frame) -
@@ -159,6 +168,7 @@ class GameRenderer(
         tanks: List<Tank>,
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
+        bounceEffects: List<BounceEffect>,
         currentTankId: Int?,
         phase: MatchPhase,
         firingTankId: Int? = null,
@@ -194,7 +204,7 @@ class GameRenderer(
         }
         canvas.drawBitmap(staticLayerBitmap!!, 0f, 0f, null)
 
-        drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, transform, firingTankId, firingMessage)
+        drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, bounceEffects, transform, firingTankId, firingMessage)
     }
 
     /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
@@ -255,11 +265,13 @@ class GameRenderer(
         tanks: List<Tank>,
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
+        bounceEffects: List<BounceEffect>,
         transform: WorldTransform,
         firingTankId: Int?,
         firingMessage: String?,
     ) {
         drawImpactEffects(canvas, impactEffects, transform)
+        drawBounceEffects(canvas, bounceEffects, transform)
 
         for (projectile in projectiles) {
             canvas.drawCircle(
@@ -398,6 +410,96 @@ class GameRenderer(
             impactPaint.color = Color.argb((alphaMult * 255).toInt(), red, green, blue)
             canvas.drawCircle(cx, cy, r, impactPaint)
         }
+    }
+
+    /** Short-lived marker at a wall/ceiling bounce point - see [BounceEffect] - dispatched
+     * to a per-[EdgeType] shape/color/animation below so each bounce type reads as visually
+     * distinct on the game canvas. Never called for [EdgeType.NONE]/[EdgeType.BLAST_STEEL]
+     * (the latter produces an [ImpactEffect] instead, drawn like a real explosion). */
+    private fun drawBounceEffects(canvas: Canvas, bounceEffects: List<BounceEffect>, transform: WorldTransform) {
+        for (bounce in bounceEffects) {
+            if (bounce.age >= BOUNCE_EFFECT_LIFETIME_SECONDS) continue
+
+            val screenX = transform.screenX(bounce.x)
+            val screenY = transform.screenY(bounce.y)
+            val lifeFraction = bounce.age / BOUNCE_EFFECT_LIFETIME_SECONDS
+            val growFraction = (lifeFraction / BOUNCE_GROW_FRACTION).coerceAtMost(1f)
+            val fadeAlpha = if (lifeFraction < BOUNCE_GROW_FRACTION) {
+                1f
+            } else {
+                1f - (lifeFraction - BOUNCE_GROW_FRACTION) / (1f - BOUNCE_GROW_FRACTION)
+            }
+            val radius = BOUNCE_MARK_RADIUS * transform.scale
+
+            when (bounce.edgeType) {
+                EdgeType.PADDED -> drawPaddedMark(canvas, screenX, screenY, radius, growFraction, fadeAlpha)
+                EdgeType.RUBBER -> drawRubberMark(canvas, screenX, screenY, radius, growFraction, fadeAlpha)
+                EdgeType.SPRING -> drawSpringMark(canvas, screenX, screenY, radius, growFraction, fadeAlpha)
+                EdgeType.REFLECTIVE -> drawReflectiveMark(canvas, screenX, screenY, radius, growFraction, fadeAlpha)
+                EdgeType.WRAP -> drawWrapMark(canvas, screenX, screenY, radius, growFraction, fadeAlpha)
+                EdgeType.NONE, EdgeType.BLAST_STEEL -> Unit
+            }
+        }
+    }
+
+    /** Soft green squash: starts wide-and-flat, relaxes toward round as it fades. */
+    private fun drawPaddedMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0x66, 0xBB, 0x6A)
+        val squash = 1f - growFraction * 0.6f
+        edgeMarkRect.set(cx - radius * 2f, cy - radius * squash, cx + radius * 2f, cy + radius * squash)
+        canvas.drawOval(edgeMarkRect, edgeMarkPaint)
+    }
+
+    /** Orange starburst: 6 lines snap outward from the point, then fade. */
+    private fun drawRubberMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0xFF, 0xA7, 0x26)
+        edgeMarkPaint.strokeWidth = 2f
+        val length = radius * 1.5f * growFraction
+        for (i in 0 until 6) {
+            val angleRad = Math.toRadians((i * 60).toDouble())
+            val dx = (cos(angleRad) * length).toFloat()
+            val dy = (sin(angleRad) * length).toFloat()
+            canvas.drawLine(cx, cy, cx + dx, cy + dy, edgeMarkPaint)
+        }
+    }
+
+    /** Cyan zigzag coil that scales up from the point, then fades. */
+    private fun drawSpringMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0x29, 0xB6, 0xF6)
+        edgeMarkPaint.style = Paint.Style.STROKE
+        edgeMarkPaint.strokeWidth = 2f
+        val size = radius * growFraction
+        edgeMarkPath.reset()
+        edgeMarkPath.moveTo(cx - size, cy - size)
+        edgeMarkPath.lineTo(cx - size / 2f, cy + size)
+        edgeMarkPath.lineTo(cx, cy - size)
+        edgeMarkPath.lineTo(cx + size / 2f, cy + size)
+        edgeMarkPath.lineTo(cx + size, cy - size)
+        canvas.drawPath(edgeMarkPath, edgeMarkPaint)
+        edgeMarkPaint.style = Paint.Style.FILL
+    }
+
+    /** White sparkle/asterisk - near-instant flash, fades quickly (a mirror glint). */
+    private fun drawReflectiveMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0xFF, 0xFF, 0xFF)
+        edgeMarkPaint.strokeWidth = 2f
+        canvas.drawLine(cx - radius, cy, cx + radius, cy, edgeMarkPaint)
+        canvas.drawLine(cx, cy - radius, cx, cy + radius, edgeMarkPaint)
+        val diag = radius * 0.7f
+        canvas.drawLine(cx - diag, cy - diag, cx + diag, cy + diag, edgeMarkPaint)
+        canvas.drawLine(cx - diag, cy + diag, cx + diag, cy - diag, edgeMarkPaint)
+    }
+
+    /** Violet stroked ring that pops (grows then shrinks) at both the exit and entry point
+     * of a teleport - [BounceEffect] doesn't distinguish which end this is, so both use the
+     * same simple pop animation. */
+    private fun drawWrapMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0x7E, 0x57, 0xC2)
+        edgeMarkPaint.style = Paint.Style.STROKE
+        edgeMarkPaint.strokeWidth = 3f
+        val r = radius * (0.3f + growFraction * 0.7f)
+        canvas.drawCircle(cx, cy, r, edgeMarkPaint)
+        edgeMarkPaint.style = Paint.Style.FILL
     }
 
     private fun drawTank(canvas: Canvas, tank: Tank, terrain: HeightMap, transform: WorldTransform, colorOverride: Int? = null) {
@@ -615,6 +717,14 @@ class GameRenderer(
         private const val HOLD_SECONDS = 0.25f
         private const val FADE_SECONDS = 0.25f
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = GROWTH_SECONDS + HOLD_SECONDS + FADE_SECONDS
+
+        // Wall/ceiling bounce marks: grow over the first 30% of a short 0.25s life, then
+        // fade over the rest - see drawBounceEffects. Mirrors GameEngine's own
+        // BOUNCE_EFFECT_LIFETIME_SECONDS constant (kept separate since this is a rendering
+        // concern, not engine state).
+        private const val BOUNCE_EFFECT_LIFETIME_SECONDS = 0.25f
+        private const val BOUNCE_GROW_FRACTION = 0.3f
+        private const val BOUNCE_MARK_RADIUS = 10f
 
         // Start-of-turn color flash: 4 white (or magenta, for an already-white tank)
         // flashes, each lasting 0.1s, separated by 0.1s back at the normal color.

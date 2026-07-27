@@ -91,7 +91,7 @@ class GameViewModel @Inject constructor(
             )
         }
 
-        engine = GameEngine(heightMap, tanks)
+        engine = GameEngine(heightMap, tanks, wallType = matchConfig.wallType, ceilingType = matchConfig.ceilingType)
         voiceSettings = matchConfig.tankConfigs.map { TankVoiceSettings(it.voiceId, it.pitch, it.speechRate) }
         publishState()
     }

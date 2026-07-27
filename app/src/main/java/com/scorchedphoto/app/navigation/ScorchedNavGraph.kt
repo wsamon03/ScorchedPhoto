@@ -1,6 +1,8 @@
 package com.scorchedphoto.app.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -13,7 +15,9 @@ import com.scorchedphoto.app.result.VictoryScreen
 import com.scorchedphoto.app.settings.AttackPhrasesScreen
 import com.scorchedphoto.app.settings.DeathPhrasesScreen
 import com.scorchedphoto.app.settings.SettingsScreen
+import com.scorchedphoto.app.setup.GameSettingsScreen
 import com.scorchedphoto.app.setup.GameSetupScreen
+import com.scorchedphoto.app.setup.GameSetupViewModel
 import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
 
 @Composable
@@ -39,7 +43,15 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
             AttackPhrasesScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.GameSetup.route) {
-            GameSetupScreen(onStartMatch = { navController.navigate(Screen.PhotoSource.route) })
+            GameSetupScreen(
+                onStartMatch = { navController.navigate(Screen.PhotoSource.route) },
+                onOpenSettings = { navController.navigate(Screen.GameSettings.route) },
+            )
+        }
+        composable(Screen.GameSettings.route) { backStackEntry ->
+            val gameSetupEntry = remember(backStackEntry) { navController.getBackStackEntry(Screen.GameSetup.route) }
+            val viewModel: GameSetupViewModel = hiltViewModel(gameSetupEntry)
+            GameSettingsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
         }
         composable(Screen.PhotoSource.route) {
             PhotoSourceScreen(onPhotoReady = { navController.navigate(Screen.PhotoCrop.route) })

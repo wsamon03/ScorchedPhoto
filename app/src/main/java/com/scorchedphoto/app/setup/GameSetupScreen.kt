@@ -26,10 +26,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -61,7 +65,11 @@ private const val RHVOICE_URL = "https://f-droid.org/packages/com.github.olga_ya
 private val PITCH_RATE_RANGE = 0.5f..2.0f
 
 @Composable
-fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hiltViewModel()) {
+fun GameSetupScreen(
+    onStartMatch: () -> Unit,
+    onOpenSettings: () -> Unit,
+    viewModel: GameSetupViewModel = hiltViewModel(),
+) {
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     val tankConfigs by viewModel.tankConfigs.collectAsStateWithLifecycle()
     val availableVoices by viewModel.availableVoices.collectAsStateWithLifecycle()
@@ -75,7 +83,16 @@ fun GameSetupScreen(onStartMatch: () -> Unit, viewModel: GameSetupViewModel = hi
                 .padding(padding)
                 .padding(16.dp),
         ) {
-            Text("Game Setup", style = MaterialTheme.typography.headlineMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Game Setup", style = MaterialTheme.typography.headlineMedium)
+                IconButton(onClick = onOpenSettings) {
+                    Icon(imageVector = Icons.Filled.Settings, contentDescription = "Match Settings")
+                }
+            }
 
             Row(
                 modifier = Modifier

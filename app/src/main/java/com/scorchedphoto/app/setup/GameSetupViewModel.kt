@@ -6,6 +6,7 @@ import com.scorchedphoto.app.tts.CustomVoice
 import com.scorchedphoto.app.tts.CustomVoiceRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
 import com.scorchedphoto.app.tts.VoiceOption
+import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,6 +43,12 @@ class GameSetupViewModel @Inject constructor(
 
     private val _tankConfigs = MutableStateFlow(defaultConfigs(MIN_TANKS))
     val tankConfigs: StateFlow<List<TankConfig>> = _tankConfigs.asStateFlow()
+
+    private val _wallType = MutableStateFlow(EdgeType.NONE)
+    val wallType: StateFlow<EdgeType> = _wallType.asStateFlow()
+
+    private val _ceilingType = MutableStateFlow(EdgeType.NONE)
+    val ceilingType: StateFlow<EdgeType> = _ceilingType.asStateFlow()
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
@@ -123,8 +130,16 @@ class GameSetupViewModel @Inject constructor(
         deathLineSpeaker.speak("Hello, my name is $voiceName", config.voiceId, config.pitch, config.speechRate)
     }
 
+    fun setWallType(type: EdgeType) {
+        _wallType.value = type
+    }
+
+    fun setCeilingType(type: EdgeType) {
+        _ceilingType.value = type
+    }
+
     fun commitAndStart() {
-        matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value)
+        matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value, _wallType.value, _ceilingType.value)
     }
 
     private fun updateAt(index: Int, transform: (TankConfig) -> TankConfig) {

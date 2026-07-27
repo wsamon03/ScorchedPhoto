@@ -32,6 +32,8 @@ class GameEngine(
     val tanks: List<Tank>,
     val wind: Wind = Wind(),
     val maxWindMagnitude: Float = 15f,
+    val wallType: EdgeType = EdgeType.NONE,
+    val ceilingType: EdgeType = EdgeType.NONE,
     private val rng: Random = Random.Default,
 ) {
     private val turnManager = TurnManager(tanks)
@@ -44,6 +46,7 @@ class GameEngine(
 
     private val activeProjectiles = mutableListOf<Projectile>()
     private val activeImpactEffects = mutableListOf<ImpactEffect>()
+    private val activeBounceEffects = mutableListOf<BounceEffect>()
     private val pendingEvents = mutableListOf<GameEvent>()
 
     // Ids of tanks killed since the current shot was fired - reset at the start of each
@@ -62,6 +65,9 @@ class GameEngine(
 
     /** Short-lived flashes at recent impact points, for the renderer to fade out. */
     val impactEffects: List<ImpactEffect> get() = activeImpactEffects
+
+    /** Short-lived flashes at recent wall/ceiling bounce points, for the renderer to fade out. */
+    val bounceEffects: List<BounceEffect> get() = activeBounceEffects
 
     init {
         for (tank in tanks) {
@@ -110,6 +116,7 @@ class GameEngine(
         tickProjectiles(dt)
         applyTankGravity(dt)
         ageImpactEffects(dt)
+        ageBounceEffects(dt)
         updateBurningTanks(dt)
         updateAwaitingExplosion(dt)
         startPendingBurns()
@@ -169,11 +176,62 @@ class GameEngine(
                     pendingEvents += GameEvent.Impact
                     iterator.remove()
                 }
+                wallType != EdgeType.NONE && (p.x <= 0f || p.x >= terrain.width) ->
+                    handleEdgeBounce(iterator, p, wallType, isWall = true)
+                ceilingType != EdgeType.NONE && p.y <= 0f ->
+                    handleEdgeBounce(iterator, p, ceilingType, isWall = false)
                 p.x < -terrain.width || p.x > 2 * terrain.width -> iterator.remove() // fizzle, flew off into the void
             }
         }
 
         spawned?.let { activeProjectiles += it }
+    }
+
+    /**
+     * Applied when a still-flying projectile reaches the wall (x<=0 or x>=terrain.width,
+     * [isWall]=true) or ceiling (y<=0, [isWall]=false) boundary and [edgeType] configures
+     * something other than NONE for that edge. BLAST_STEEL detonates it in place, reusing the
+     * existing impact pipeline wholesale; WRAP teleports it to the opposite edge with velocity
+     * untouched; the remaining four types clamp the projectile exactly onto the boundary and
+     * reflect the relevant axis's velocity, scaled by a per-type "energy retention" multiplier.
+     */
+    private fun handleEdgeBounce(iterator: MutableIterator<Projectile>, p: Projectile, edgeType: EdgeType, isWall: Boolean) {
+        when (edgeType) {
+            EdgeType.NONE -> Unit // unreachable - callers only invoke this when edgeType != NONE
+            EdgeType.BLAST_STEEL -> {
+                resolveImpact(p.weapon, p.x, p.y)
+                pendingEvents += GameEvent.Impact
+                iterator.remove()
+            }
+            EdgeType.WRAP -> {
+                activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // exit point
+                if (isWall) {
+                    p.x = if (p.x <= 0f) terrain.width.toFloat() else 0f
+                } else {
+                    p.y = terrain.height.toFloat()
+                }
+                activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // entry point
+            }
+            else -> { // PADDED, RUBBER, SPRING, REFLECTIVE
+                val retention = velocityRetention(edgeType)
+                if (isWall) {
+                    p.x = p.x.coerceIn(0f, terrain.width.toFloat())
+                    p.vx = -p.vx * retention
+                } else {
+                    p.y = 0f
+                    p.vy = -p.vy * retention
+                }
+                activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
+            }
+        }
+    }
+
+    private fun velocityRetention(edgeType: EdgeType): Float = when (edgeType) {
+        EdgeType.PADDED -> 0.2f
+        EdgeType.RUBBER -> 0.6f
+        EdgeType.SPRING -> 1.2f
+        EdgeType.REFLECTIVE -> 1.0f
+        else -> error("velocityRetention called for non-bounce EdgeType $edgeType")
     }
 
     /**
@@ -347,6 +405,11 @@ class GameEngine(
         activeImpactEffects.removeAll { it.age > IMPACT_EFFECT_LIFETIME_SECONDS }
     }
 
+    private fun ageBounceEffects(dt: Float) {
+        activeBounceEffects.forEach { it.age += dt }
+        activeBounceEffects.removeAll { it.age > BOUNCE_EFFECT_LIFETIME_SECONDS }
+    }
+
     private fun finishResolution() {
         val result = turnManager.checkWinCondition() ?: mutualEliminationTie()
         if (result != null) {
@@ -387,5 +450,6 @@ class GameEngine(
         private const val DEATH_EXPLOSION_PAUSE_SECONDS = 0.5f
         // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
+        private const val BOUNCE_EFFECT_LIFETIME_SECONDS = 0.25f
     }
 }

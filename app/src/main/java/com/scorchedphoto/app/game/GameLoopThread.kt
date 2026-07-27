@@ -100,6 +100,7 @@ class GameLoopThread(
                         engine.tanks,
                         engine.projectiles,
                         engine.impactEffects,
+                        engine.bounceEffects,
                         engine.currentTank?.id,
                         engine.phase,
                         pendingSpeechTankId,

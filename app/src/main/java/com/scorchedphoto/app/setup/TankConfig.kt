@@ -1,5 +1,6 @@
 package com.scorchedphoto.app.setup
 
+import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 
@@ -15,7 +16,11 @@ data class TankConfig(
     val speechRate: Float = 1.0f,
 )
 
-data class MatchConfig(val tankConfigs: List<TankConfig>)
+data class MatchConfig(
+    val tankConfigs: List<TankConfig>,
+    val wallType: EdgeType = EdgeType.NONE,
+    val ceilingType: EdgeType = EdgeType.NONE,
+)
 
 val TANK_COLOR_PALETTE: List<Int> = listOf(
     0xFFE53935L.toInt(),
