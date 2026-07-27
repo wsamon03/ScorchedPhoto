@@ -1,26 +1,34 @@
 package com.scorchedphoto.app.tts
 
 import android.content.Context
+import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
+import com.scorchedphoto.app.settings.AudioSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
- * Speaks a tank's death-taunt line aloud (see [com.scorchedphoto.app.game.GameRenderer]'s
- * `BurnTaunt`s), in whichever real on-device voice - and pitch/rate on top of it - its
- * player picked during setup. Owns a single shared [TextToSpeech] engine for the whole app
- * process ([Singleton], same lifetime rationale as [com.scorchedphoto.app.ml.TfliteSkySegmentationModel]),
- * since there's never a need for more than one at a time.
+ * Speaks a tank's death/pre-fire taunt line aloud (see [com.scorchedphoto.app.settings.Phrase]),
+ * in whichever real on-device voice - and pitch/rate on top of it - its player picked during
+ * setup. Owns a single shared [TextToSpeech] engine for the whole app process ([Singleton],
+ * same lifetime rationale as [com.scorchedphoto.app.ml.TfliteSkySegmentationModel]), since
+ * there's never a need for more than one at a time.
  */
 @Singleton
-class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context) {
+class DeathLineSpeaker @Inject constructor(
+    @ApplicationContext context: Context,
+    audioSettingsRepository: AudioSettingsRepository,
+) {
 
     private data class SpeakRequest(val text: String, val voiceId: String?, val pitch: Float, val speechRate: Float)
 
@@ -41,6 +49,10 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
         Thread(runnable, "DeathLineSpeaker-TTS").apply { isDaemon = true }
     }
 
+    // Read on speechExecutor (see enqueue), written from the settings collector below -
+    // plain @Volatile so enqueue() never needs to suspend.
+    @Volatile private var voiceVolume = 1f
+
     private val _availableVoices = MutableStateFlow(listOf(VoiceOption.SYSTEM_DEFAULT))
 
     /** Voices this device's TTS engine actually has, ready to use - starts as just
@@ -58,6 +70,14 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
             } else {
                 pending.clear()
             }
+        }
+    }
+
+    init {
+        // Lives for the app process, same as this singleton itself - never cancelled, same
+        // rationale as speechExecutor above.
+        CoroutineScope(Dispatchers.Default).launch {
+            audioSettingsRepository.settings.collect { voiceVolume = it.voiceVolume }
         }
     }
 
@@ -82,7 +102,8 @@ class DeathLineSpeaker @Inject constructor(@ApplicationContext context: Context)
         resolved?.let { tts.voice = it }
         tts.setPitch(pitch)
         tts.setSpeechRate(speechRate)
-        tts.speak(text, TextToSpeech.QUEUE_ADD, null, "death-${counter++}")
+        val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, voiceVolume) }
+        tts.speak(text, TextToSpeech.QUEUE_ADD, params, "death-${counter++}")
     }
 
     /**

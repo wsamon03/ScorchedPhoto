@@ -10,6 +10,9 @@ import com.scorchedphoto.app.capture.PhotoSourceScreen
 import com.scorchedphoto.app.game.GameScreen
 import com.scorchedphoto.app.home.HomeScreen
 import com.scorchedphoto.app.result.VictoryScreen
+import com.scorchedphoto.app.settings.AttackPhrasesScreen
+import com.scorchedphoto.app.settings.DeathPhrasesScreen
+import com.scorchedphoto.app.settings.SettingsScreen
 import com.scorchedphoto.app.setup.GameSetupScreen
 import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
 
@@ -17,7 +20,23 @@ import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
 fun ScorchedNavGraph(navController: NavHostController = rememberNavController()) {
     NavHost(navController = navController, startDestination = Screen.Home.route) {
         composable(Screen.Home.route) {
-            HomeScreen(onNewGame = { navController.navigate(Screen.GameSetup.route) })
+            HomeScreen(
+                onNewGame = { navController.navigate(Screen.GameSetup.route) },
+                onSettings = { navController.navigate(Screen.Settings.route) },
+            )
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onDeathPhrases = { navController.navigate(Screen.DeathPhrases.route) },
+                onAttackPhrases = { navController.navigate(Screen.AttackPhrases.route) },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.DeathPhrases.route) {
+            DeathPhrasesScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.AttackPhrases.route) {
+            AttackPhrasesScreen(onBack = { navController.popBackStack() })
         }
         composable(Screen.GameSetup.route) {
             GameSetupScreen(onStartMatch = { navController.navigate(Screen.PhotoSource.route) })

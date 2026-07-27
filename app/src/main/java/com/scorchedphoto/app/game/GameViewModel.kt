@@ -6,6 +6,8 @@ import com.scorchedphoto.app.audio.GameSoundController
 import com.scorchedphoto.app.capture.PhotoRepository
 import com.scorchedphoto.app.result.MatchResultRepository
 import com.scorchedphoto.app.result.MatchWinner
+import com.scorchedphoto.app.settings.PhraseCategory
+import com.scorchedphoto.app.settings.PhraseRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
@@ -21,6 +23,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject.Inject
 import kotlin.random.Random
@@ -30,6 +33,7 @@ class GameViewModel @Inject constructor(
     terrainRepository: TerrainRepository,
     matchConfigRepository: MatchConfigRepository,
     photoRepository: PhotoRepository,
+    phraseRepository: PhraseRepository,
     private val matchResultRepository: MatchResultRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
     val soundController: GameSoundController,
@@ -46,6 +50,14 @@ class GameViewModel @Inject constructor(
 
     private data class TankVoiceSettings(val voiceId: String?, val pitch: Float, val speechRate: Float)
     private val voiceSettings: List<TankVoiceSettings>
+
+    // Snapshotted once per match, the same way voiceSettings/heightMap are - a player isn't
+    // expected to edit phrases mid-match, and GameSurfaceView/GameRenderer/GameLoopThread
+    // need a plain synchronous List at construction time, not a Flow. runBlocking is safe
+    // here: this only runs once, during ViewModel init, and Room's tiny phrases table
+    // resolves essentially instantly.
+    val deathPhrases: List<String> = runBlocking { phraseRepository.getEnabledTexts(PhraseCategory.DEATH) }
+    val attackPhrases: List<String> = runBlocking { phraseRepository.getEnabledTexts(PhraseCategory.ATTACK) }
 
     init {
         val storedHeightMap = requireNotNull(terrainRepository.heightMap) {

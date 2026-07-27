@@ -23,10 +23,12 @@ class GameSurfaceView(
     onBurnMessageAssigned: (Int, String) -> Unit,
     private val onFireMessageAssigned: (Int, String) -> Unit,
     private val soundController: GameSoundController,
+    deathPhrases: List<String>,
+    private val attackPhrases: List<String>,
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
     private val originalGroundY = engine.terrain.groundY.copyOf()
-    private val renderer = GameRenderer(context, photo, originalGroundY, onBurnMessageAssigned)
+    private val renderer = GameRenderer(context, photo, originalGroundY, deathPhrases, onBurnMessageAssigned)
     private var loopThread: GameLoopThread? = null
 
     init {
@@ -34,7 +36,16 @@ class GameSurfaceView(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        val thread = GameLoopThread(holder, engine, renderer, commandQueue, onStateChanged, onFireMessageAssigned, soundController)
+        val thread = GameLoopThread(
+            holder,
+            engine,
+            renderer,
+            commandQueue,
+            onStateChanged,
+            onFireMessageAssigned,
+            soundController,
+            attackPhrases,
+        )
         thread.running = true
         thread.start()
         loopThread = thread

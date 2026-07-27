@@ -4,9 +4,14 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
 import com.scorchedphoto.app.R
+import com.scorchedphoto.app.settings.AudioSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Owns every gameplay sound effect: short one-shots via [SoundPool] (shot, impact,
@@ -21,7 +26,10 @@ import javax.inject.Singleton
  * worth of sound at a time.
  */
 @Singleton
-class GameSoundController @Inject constructor(@ApplicationContext context: Context) {
+class GameSoundController @Inject constructor(
+    @ApplicationContext context: Context,
+    audioSettingsRepository: AudioSettingsRepository,
+) {
 
     private val soundPool = SoundPool.Builder()
         .setMaxStreams(MAX_STREAMS)
@@ -44,11 +52,32 @@ class GameSoundController @Inject constructor(@ApplicationContext context: Conte
 
     // tankId -> its active looping fire-crackle stream, so overlapping deaths each get
     // their own independent loop that stops only when that specific tank stops burning.
-    private val burningStreams = mutableMapOf<Int, Int>()
+    // ConcurrentHashMap rather than a plain map: written from the game-loop thread
+    // (updateBurningTanks) but also iterated from the settings-collector coroutine below.
+    private val burningStreams = ConcurrentHashMap<Int, Int>()
+
+    // Read on the game-loop thread (every play()/updateWhistle() call), written from the
+    // settings collector below - plain @Volatile rather than a suspend read, since this
+    // class's whole public API must stay synchronous/non-blocking for its caller (see class
+    // doc: driven once per frame from GameLoopThread).
+    @Volatile private var sfxVolume = 1f
 
     init {
         soundPool.setOnLoadCompleteListener { _, sampleId, status ->
             if (status == 0) loadedSoundIds += sampleId
+        }
+        // Lives for the app process, same as this singleton itself - never cancelled, same
+        // rationale as DeathLineSpeaker's speechExecutor.
+        CoroutineScope(Dispatchers.Default).launch {
+            audioSettingsRepository.settings.collect { settings ->
+                sfxVolume = settings.sfxVolume
+                whistle.volumeMultiplier = settings.sfxVolume
+                // Already-looping fire-crackle streams don't otherwise notice a volume
+                // change until they'd next restart, so nudge any currently playing ones.
+                for (streamId in burningStreams.values) {
+                    soundPool.setVolume(streamId, FIRE_LOOP_VOLUME * sfxVolume, FIRE_LOOP_VOLUME * sfxVolume)
+                }
+            }
         }
     }
 
@@ -92,14 +121,16 @@ class GameSoundController @Inject constructor(@ApplicationContext context: Conte
         val toStart = burningTankIds - burningStreams.keys
         for (tankId in toStart) {
             if (fireLoopSoundId !in loadedSoundIds) continue
-            val streamId = soundPool.play(fireLoopSoundId, FIRE_LOOP_VOLUME, FIRE_LOOP_VOLUME, 1, -1, 1f)
+            val volume = FIRE_LOOP_VOLUME * sfxVolume
+            val streamId = soundPool.play(fireLoopSoundId, volume, volume, 1, -1, 1f)
             if (streamId != 0) burningStreams[tankId] = streamId
         }
     }
 
     private fun play(soundId: Int, volume: Float) {
         if (soundId !in loadedSoundIds) return
-        soundPool.play(soundId, volume, volume, 0, 0, 1f)
+        val scaled = volume * sfxVolume
+        soundPool.play(soundId, scaled, scaled, 0, 0, 1f)
     }
 
     companion object {

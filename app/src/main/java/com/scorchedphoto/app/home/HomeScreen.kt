@@ -24,7 +24,7 @@ import com.scorchedphoto.app.R
 import com.scorchedphoto.app.ui.LockScreenOrientation
 
 @Composable
-fun HomeScreen(onNewGame: () -> Unit) {
+fun HomeScreen(onNewGame: () -> Unit, onSettings: () -> Unit) {
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     Box(modifier = Modifier.fillMaxSize()) {
         // Background icon
@@ -64,6 +64,9 @@ fun HomeScreen(onNewGame: () -> Unit) {
 
             Button(onClick = onNewGame) {
                 Text("New Game")
+            }
+            Button(onClick = onSettings, modifier = Modifier.padding(top = 12.dp)) {
+                Text("Settings")
             }
 
             Box(modifier = Modifier.padding(bottom = 32.dp))

@@ -30,6 +30,7 @@ class GameLoopThread(
     private val onStateChanged: () -> Unit,
     private val onFireMessageAssigned: (Int, String) -> Unit,
     private val soundController: GameSoundController,
+    private val attackPhrases: List<String>,
 ) : Thread("GameLoopThread") {
 
     @Volatile
@@ -156,13 +157,19 @@ class GameLoopThread(
         soundController.updateBurningTanks(burningTankIds)
     }
 
-    /** Kicks off a shot: picks a random pre-fire taunt for [tankId], hands it to
-     * [onFireMessageAssigned] so it's spoken once (mirroring
+    /** Kicks off a shot: picks a random pre-fire taunt for [tankId] from [attackPhrases],
+     * hands it to [onFireMessageAssigned] so it's spoken once (mirroring
      * [com.scorchedphoto.app.game.GameRenderer]'s death-taunt speak-once pattern), and
      * holds off the actual [beginFire] (shot sound, whistle, missile) until
-     * [advancePendingSpeech] has given the line [FIRE_SPEECH_LEAD_SECONDS] to play out. */
+     * [advancePendingSpeech] has given the line [FIRE_SPEECH_LEAD_SECONDS] to play out. If
+     * [attackPhrases] is empty (every attack phrase disabled or none exist) there's nothing
+     * to show/speak, so the shot fires immediately with no taunt/delay at all. */
     private fun beginFireSequence(tankId: Int) {
-        val taunt = FIRE_TAUNTS.random(cpuRandom)
+        val taunt = attackPhrases.randomOrNull(cpuRandom)
+        if (taunt == null) {
+            beginFire()
+            return
+        }
         pendingSpeechTankId = tankId
         pendingSpeechText = taunt
         pendingSpeechElapsed = 0f
@@ -274,22 +281,5 @@ class GameLoopThread(
         // stays up (GameEngine.TANK_BURNING_DURATION_SECONDS) before its closing explosion,
         // so both taunts get the same amount of time to read/play out.
         private const val FIRE_SPEECH_LEAD_SECONDS = 2f
-
-        private val FIRE_TAUNTS = listOf(
-            "I've got you now!",
-            "You're a gonner!",
-            "Cowabunga!",
-            "Let's do this!",
-            "You made me do this!",
-            "1, 2, 3, 4, my bombs are gonna score!",
-            "Bombs away!",
-            "Fire!",
-            "Fiiirrree!",
-            "Die!",
-            "Death to all!",
-            "Oops...",
-            "My bad.",
-            "Is this how it works?",
-        )
     }
 }

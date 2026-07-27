@@ -28,6 +28,12 @@ class WhistleOscillator {
     @Volatile private var targetAmplitude = 0f
     private var writerThread: Thread? = null
 
+    /** The SFX volume setting (0f..1f), applied on top of [WHISTLE_AMPLITUDE] - see
+     * [com.scorchedphoto.app.audio.GameSoundController]'s settings collector, the only
+     * writer. Read every sample in [runLoop], so this stays a plain field rather than
+     * anything that could suspend/block that thread. */
+    @Volatile var volumeMultiplier = 1f
+
     /** Begins the writer thread; produces silence until [setActive] turns the whistle on. */
     fun start() {
         if (running) return
@@ -101,7 +107,7 @@ class WhistleOscillator {
                     val breath = (rng.nextFloat() * 2f - 1f) * BREATH_NOISE_MIX
                     val wave = (tone + breath) * WAVE_NORMALIZATION
 
-                    buffer[i] = (wave * currentAmplitude * Short.MAX_VALUE).toInt().toShort()
+                    buffer[i] = (wave * currentAmplitude * volumeMultiplier * Short.MAX_VALUE).toInt().toShort()
                 }
                 track.write(buffer, 0, buffer.size)
             }

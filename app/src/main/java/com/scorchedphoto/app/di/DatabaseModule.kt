@@ -2,6 +2,9 @@ package com.scorchedphoto.app.di
 
 import android.content.Context
 import androidx.room.Room
+import com.scorchedphoto.app.settings.AudioSettingsDao
+import com.scorchedphoto.app.settings.PhraseDao
+import com.scorchedphoto.app.settings.SettingsDatabase
 import com.scorchedphoto.app.tts.CustomVoiceDao
 import com.scorchedphoto.app.tts.CustomVoiceDatabase
 import dagger.Module
@@ -22,4 +25,19 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideCustomVoiceDao(database: CustomVoiceDatabase): CustomVoiceDao = database.customVoiceDao()
+
+    @Provides
+    @Singleton
+    fun provideSettingsDatabase(@ApplicationContext context: Context): SettingsDatabase =
+        Room.databaseBuilder(context, SettingsDatabase::class.java, "settings.db")
+            .addCallback(SettingsDatabase.callback)
+            .build()
+
+    @Provides
+    @Singleton
+    fun providePhraseDao(database: SettingsDatabase): PhraseDao = database.phraseDao()
+
+    @Provides
+    @Singleton
+    fun provideAudioSettingsDao(database: SettingsDatabase): AudioSettingsDao = database.audioSettingsDao()
 }

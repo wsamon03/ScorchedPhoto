@@ -41,6 +41,7 @@ class GameRenderer(
     private val context: Context,
     private val photo: Bitmap?,
     private val originalGroundY: IntArray,
+    private val deathPhrases: List<String>,
     private val onBurnMessageAssigned: (tankId: Int, spokenText: String) -> Unit = { _, _ -> },
 ) {
 
@@ -111,8 +112,10 @@ class GameRenderer(
     }
 
     // A tank's taunt is picked once, the first time it's drawn burning, and kept for the
-    // whole burn rather than re-rolled every frame - see burnMessageFor.
-    private val burnMessages = mutableMapOf<Int, BurnTaunt>()
+    // whole burn rather than re-rolled every frame - see burnMessageFor. A null value means
+    // "already checked, nothing to say" (deathPhrases was empty/all-disabled) - getOrPut
+    // caches that too, so it's never re-checked for the rest of this tank's burn.
+    private val burnMessages = mutableMapOf<Int, String?>()
 
     // Each ash pile's speck layout, generated once per tank (deterministically, from its
     // own id) and reused every frame - see ashSpecksFor. Without caching, redrawing fresh
@@ -450,7 +453,7 @@ class GameRenderer(
         val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
 
-        drawSpeechBubble(canvas, cx, dst.top, burnMessageFor(tank).displayText)
+        burnMessageFor(tank)?.let { drawSpeechBubble(canvas, cx, dst.top, it) }
     }
 
     /** Shows a tank's pre-fire taunt - see [GameLoopThread.beginFireSequence], which picks
@@ -470,9 +473,11 @@ class GameRenderer(
      * ever reach this call. A tank dies at most once per match, so the entry is simply
      * left behind afterward - harmless, and gone once this renderer's match ends. Fires
      * [onBurnMessageAssigned] exactly once per death (inside [getOrPut]'s lambda, which
-     * only ever runs on first insert) so the caller can speak it via TTS. */
-    private fun burnMessageFor(tank: Tank): BurnTaunt =
-        burnMessages.getOrPut(tank.id) { BURN_TAUNTS.random().also { onBurnMessageAssigned(tank.id, it.spokenText) } }
+     * only ever runs on first insert) so the caller can speak it via TTS. Null when
+     * [deathPhrases] is empty (every death phrase disabled or none exist) - the tank then
+     * shows no bubble and says nothing, rather than falling back to some hardcoded line. */
+    private fun burnMessageFor(tank: Tank): String? =
+        burnMessages.getOrPut(tank.id) { deathPhrases.randomOrNull()?.also { onBurnMessageAssigned(tank.id, it) } }
 
     /** What's left where a tank died - a squat mound in the tank's own color muddied
      * toward grey, with a scatter of black/grey specks on top. Permanent for the rest of
@@ -640,17 +645,6 @@ class GameRenderer(
         // Mostly grey, with a hint of the tank's own color still showing through.
         private const val ASH_GREY_LEVEL = 130
 
-        // spokenText differs from displayText only for the censored line: the bubble
-        // still shows the symbols, but TTS reads a natural stand-in instead of literally
-        // sounding out "hash dollar at exclamation mark".
-        private data class BurnTaunt(val displayText: String, val spokenText: String = displayText)
-        private val BURN_TAUNTS = listOf(
-            BurnTaunt("Not again!"),
-            BurnTaunt("#\$@!", spokenText = "Argh!!"),
-            BurnTaunt("Ouch! That hurts!"),
-            BurnTaunt("I'll get you next time!"),
-            BurnTaunt("Why me?"),
-        )
         private const val BUBBLE_PADDING_X = 12f
         private const val BUBBLE_PADDING_Y = 8f
         private const val BUBBLE_CORNER_RADIUS = 10f
