@@ -16,9 +16,11 @@ import kotlin.random.Random
 /**
  * Fixed-timestep game loop on its own thread: drains queued [GameCommand]s, ticks
  * [engine] independent of draw rate (accumulator pattern), draws every frame via
- * [renderer], and calls [onStateChanged] only every few frames so the Compose HUD isn't
- * rebuilt 60 times a second. This is the only thread that ever mutates engine state once
- * the surface is live, so HUD input reaches it exclusively through [commandQueue].
+ * [renderer], and calls [onStateChanged] every ticked frame so the Compose HUD stays as
+ * responsive as the physics itself - safe to call this often since [onStateChanged]'s
+ * `MutableStateFlow` only actually triggers recomposition when the published state changes,
+ * not on every call. This is the only thread that ever mutates engine state once the
+ * surface is live, so HUD input reaches it exclusively through [commandQueue].
  */
 class GameLoopThread(
     private val surfaceHolder: SurfaceHolder,
@@ -58,7 +60,6 @@ class GameLoopThread(
     override fun run() {
         var accumulator = 0f
         var lastNanos = System.nanoTime()
-        var frameCount = 0
 
         while (running) {
             val frameStartNanos = System.nanoTime()
@@ -84,10 +85,7 @@ class GameLoopThread(
             }
 
             if (ticked) {
-                frameCount++
-                if (frameCount % STATE_UPDATE_EVERY_N_FRAMES == 0) {
-                    onStateChanged()
-                }
+                onStateChanged()
             }
 
             updateSound()
@@ -102,6 +100,7 @@ class GameLoopThread(
                         engine.projectiles,
                         engine.impactEffects,
                         engine.currentTank?.id,
+                        engine.phase,
                         pendingSpeechTankId,
                         pendingSpeechText,
                     )
@@ -260,7 +259,6 @@ class GameLoopThread(
 
     companion object {
         private const val FIXED_DT = 1f / 60f
-        private const val STATE_UPDATE_EVERY_N_FRAMES = 6
         private const val TARGET_FRAME_NANOS = 1_000_000_000L / 60L
         private const val CPU_THINKING_SECONDS = 1.2f
         private const val FIRE_SOUND_LEAD_SECONDS = 0.25f

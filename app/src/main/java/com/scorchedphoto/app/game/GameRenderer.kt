@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import com.scorchedphoto.engine.ImpactEffect
+import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.TankShape
@@ -26,6 +27,15 @@ import kotlin.math.sin
  * not repeated next to each tank here). Every world-space position and size is mapped
  * through a single [WorldTransform.fit] (see its doc for why: independent x/y scale
  * factors distort launch angles and motion).
+ *
+ * Split into a cached **static layer** (background, crater scars, horizon line, tank
+ * bodies/barrels, ash piles) and a **dynamic overlay** drawn fresh every frame on top
+ * (projectiles, impact flashes, burning-tank fire/bubble, the pre-fire speech bubble) - see
+ * [redrawStaticLayer]/[staticLayerDirty] doc for why: none of the static content can
+ * actually change while [MatchPhase.FIRING] (verified against every mutation site in
+ * `GameEngine`, including MIRV's split-child impacts, which always land during
+ * `RESOLVING`), so re-clearing the canvas, redrawing the background photo, and rebuilding
+ * the crater/horizon paths every single frame during a shot's flight was pure waste.
  */
 class GameRenderer(
     private val context: Context,
@@ -124,6 +134,22 @@ class GameRenderer(
     private var flashTankId: Int? = null
     private var flashStartNanos: Long = 0L
 
+    // The cached static-layer bitmap/canvas (background, crater scars, horizon line, tank
+    // bodies/barrels, ash piles) plus the WorldTransform it was drawn with - recreated only
+    // when the real canvas's size changes (WorldTransform depends solely on canvas size and
+    // terrain size, and terrain size is fixed for a match). staticLayerDirty forces a redraw
+    // whenever any of that content could have changed - see draw()'s doc for the exact
+    // conditions. IMPORTANT for future maintainers: any new mutation that changes a tank's
+    // drawn appearance (or the terrain) outside of MatchPhase.FIRING is already covered by
+    // the phase check below, but anything that could change *during* FIRING needs to either
+    // avoid doing so or explicitly set staticLayerDirty = true.
+    private var staticLayerBitmap: Bitmap? = null
+    private var staticLayerCanvas: Canvas? = null
+    private var cachedTransform: WorldTransform? = null
+    private var cachedCanvasWidth = -1
+    private var cachedCanvasHeight = -1
+    private var staticLayerDirty = true
+
     fun draw(
         canvas: Canvas,
         terrain: HeightMap,
@@ -131,16 +157,64 @@ class GameRenderer(
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
         currentTankId: Int?,
+        phase: MatchPhase,
         firingTankId: Int? = null,
         firingMessage: String? = null,
     ) {
-        canvas.drawColor(Color.BLACK)
-        val transform = WorldTransform.fit(
-            canvas.width.toFloat(),
-            canvas.height.toFloat(),
-            terrain.width.toFloat(),
-            terrain.height.toFloat(),
-        )
+        ensureStaticLayer(canvas.width, canvas.height, terrain)
+        val transform = cachedTransform!!
+
+        if (currentTankId != flashTankId) {
+            flashTankId = currentTankId
+            flashStartNanos = System.nanoTime()
+        }
+        val flashElapsedSeconds = (System.nanoTime() - flashStartNanos) / 1_000_000_000f
+        // Whether the current tank's start-of-turn flash could still be playing - driven by
+        // wall-clock time, not engine ticks, so it isn't itself gated by phase (a shot fired
+        // within ~0.8s of the turn starting can still be mid-flash during FIRING).
+        val flashWindowActive = flashTankId != null && flashElapsedSeconds < TURN_FLASH_TOTAL_SECONDS
+        val flashColor = if (flashWindowActive) {
+            turnStartFlashColor(tanks.firstOrNull { it.id == flashTankId }, flashElapsedSeconds)
+        } else {
+            null
+        }
+
+        // Nothing the static layer draws can change while phase == FIRING - verified against
+        // every mutation site in GameEngine, including MIRV's split-child impacts, which
+        // always land during RESOLVING, never FIRING - so it only needs redrawing on the
+        // first frame, whenever the canvas resizes, whenever phase isn't FIRING (AIMING's
+        // aim/turn-flash changes, RESOLVING's impacts/falls/burns/ash), or while the
+        // wall-clock turn-flash above is still active.
+        if (staticLayerDirty || phase != MatchPhase.FIRING || flashWindowActive) {
+            redrawStaticLayer(terrain, tanks, transform, currentTankId, flashColor)
+            staticLayerDirty = false
+        }
+        canvas.drawBitmap(staticLayerBitmap!!, 0f, 0f, null)
+
+        drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, transform, firingTankId, firingMessage)
+    }
+
+    /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
+     * size differs from what's cached, and marks the layer dirty so it's redrawn at its new
+     * size on the next call - handles both the very first frame (cachedCanvasWidth starts at
+     * -1, guaranteed to differ) and any later resize (e.g. rotation). */
+    private fun ensureStaticLayer(canvasWidth: Int, canvasHeight: Int, terrain: HeightMap) {
+        if (staticLayerBitmap != null && cachedCanvasWidth == canvasWidth && cachedCanvasHeight == canvasHeight) return
+        val bitmap = Bitmap.createBitmap(canvasWidth, canvasHeight, Bitmap.Config.ARGB_8888)
+        staticLayerBitmap = bitmap
+        staticLayerCanvas = Canvas(bitmap)
+        cachedCanvasWidth = canvasWidth
+        cachedCanvasHeight = canvasHeight
+        cachedTransform = WorldTransform.fit(canvasWidth.toFloat(), canvasHeight.toFloat(), terrain.width.toFloat(), terrain.height.toFloat())
+        staticLayerDirty = true
+    }
+
+    /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
+     * doc - into [staticLayerCanvas]: the background photo, crater scars, horizon line, and
+     * every tank's body/barrel or ash pile. */
+    private fun redrawStaticLayer(terrain: HeightMap, tanks: List<Tank>, transform: WorldTransform, currentTankId: Int?, flashColor: Int?) {
+        val staticCanvas = staticLayerCanvas ?: return
+        staticCanvas.drawColor(Color.BLACK)
 
         if (photo != null && srcRect != null) {
             backgroundRect.set(
@@ -149,11 +223,39 @@ class GameRenderer(
                 transform.screenX(terrain.width.toFloat()),
                 transform.screenY(terrain.height.toFloat()),
             )
-            canvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
+            staticCanvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
         }
 
-        drawCraterScars(canvas, terrain, transform)
-        drawHorizonLine(canvas, terrain, transform)
+        drawCraterScars(staticCanvas, terrain, transform)
+        drawHorizonLine(staticCanvas, terrain, transform)
+
+        for (tank in tanks) {
+            if (tank.isAsh) {
+                drawAshPile(staticCanvas, tank, transform)
+                continue
+            }
+            // Neither alive nor burning also covers the silent beat between the burn
+            // animation ending and the death explosion (Tank.awaitingExplosion) - nothing
+            // is drawn there on purpose, so the explosion reads as its own distinct event.
+            if (!tank.alive && !tank.burning) continue
+            val colorOverride = if (tank.id == currentTankId) flashColor else null
+            drawTank(staticCanvas, tank, terrain, transform, colorOverride)
+        }
+    }
+
+    /** Draws everything that's either inherently per-frame or only ever active outside
+     * [MatchPhase.FIRING] (per [draw]'s doc) directly onto the real [canvas], on top of the
+     * blitted static layer: impact flashes, in-flight projectiles, burning-tank fire/bubble,
+     * and the pre-fire speech bubble. */
+    private fun drawDynamicOverlay(
+        canvas: Canvas,
+        tanks: List<Tank>,
+        projectiles: List<Projectile>,
+        impactEffects: List<ImpactEffect>,
+        transform: WorldTransform,
+        firingTankId: Int?,
+        firingMessage: String?,
+    ) {
         drawImpactEffects(canvas, impactEffects, transform)
 
         for (projectile in projectiles) {
@@ -165,25 +267,7 @@ class GameRenderer(
             )
         }
 
-        if (currentTankId != flashTankId) {
-            flashTankId = currentTankId
-            flashStartNanos = System.nanoTime()
-        }
-        val flashColor = currentTankId?.let { id ->
-            turnStartFlashColor(tanks.firstOrNull { it.id == id }, (System.nanoTime() - flashStartNanos) / 1_000_000_000f)
-        }
-
         for (tank in tanks) {
-            if (tank.isAsh) {
-                drawAshPile(canvas, tank, transform)
-                continue
-            }
-            // Neither alive nor burning also covers the silent beat between the burn
-            // animation ending and the death explosion (Tank.awaitingExplosion) - nothing
-            // is drawn there on purpose, so the explosion reads as its own distinct event.
-            if (!tank.alive && !tank.burning) continue
-            val colorOverride = if (tank.id == currentTankId) flashColor else null
-            drawTank(canvas, tank, terrain, transform, colorOverride)
             if (tank.burning) {
                 drawBurningTank(canvas, tank, transform)
             } else if (tank.id == firingTankId && firingMessage != null) {
