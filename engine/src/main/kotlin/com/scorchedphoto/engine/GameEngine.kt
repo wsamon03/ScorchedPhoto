@@ -210,8 +210,10 @@ class GameEngine(
      * [isWall]=true) or ceiling (y<=0, [isWall]=false) boundary and [edgeType] configures
      * something other than NONE for that edge. BLAST_STEEL detonates it in place, reusing the
      * existing impact pipeline wholesale; WRAP teleports it to the opposite edge with velocity
-     * untouched; the remaining four types clamp the projectile exactly onto the boundary and
-     * reflect the relevant axis's velocity, scaled by a per-type "energy retention" multiplier.
+     * untouched for a wall, but detonates immediately at [ceilingWrapDepthY] for a ceiling
+     * (see the branch below for why); the remaining four types clamp the projectile exactly
+     * onto the boundary and reflect the relevant axis's velocity, scaled by a per-type "energy
+     * retention" multiplier.
      */
     private fun handleEdgeBounce(iterator: MutableIterator<Projectile>, p: Projectile, edgeType: EdgeType, isWall: Boolean) {
         when (edgeType) {
@@ -222,13 +224,25 @@ class GameEngine(
                 iterator.remove()
             }
             EdgeType.WRAP -> {
-                activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // exit point
                 if (isWall) {
+                    activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // exit point
                     p.x = if (p.x <= 0f) terrain.width.toFloat() else 0f
+                    activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // entry point
                 } else {
-                    p.y = ceilingWrapDepthY
+                    // A ceiling wrap always lands inside solid ground (ceilingWrapDepthY sits
+                    // near the map's bottom, below virtually any column's surface) - unlike
+                    // the wall case, there's no "keep flying" that makes sense here, since the
+                    // very next tick's ordinary ground-collision check would just resolve at
+                    // the surface height instead (discarding where it actually teleported to).
+                    // Detonate here directly, the same way BLAST_STEEL does, so the blast
+                    // actually carves from the map's bottom - CraterCarver's existing
+                    // max()-clamped carving naturally turns that into the intended "collapse
+                    // the mountain down to fill the hole" effect (see its own doc).
+                    activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // exit point, at the ceiling
+                    resolveImpact(p.weapon, p.x, ceilingWrapDepthY)
+                    pendingEvents += GameEvent.Impact
+                    iterator.remove()
                 }
-                activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // entry point
             }
             else -> { // PADDED, RUBBER, SPRING, REFLECTIVE
                 val retention = velocityRetention(edgeType)
