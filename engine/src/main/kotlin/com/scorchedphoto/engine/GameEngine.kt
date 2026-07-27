@@ -60,6 +60,18 @@ class GameEngine(
     var winResult: WinResult? = null
         private set
 
+    /**
+     * World-space Y a ceiling-WRAP'd projectile reappears at (see [handleEdgeBounce]'s WRAP
+     * branch) - defaults to [terrain]'s own height, matching the original hardcoded behavior.
+     * A caller with access to the real rendered canvas size can override this to the world-Y
+     * that maps to the canvas's actual visible bottom edge instead, so a wrap reliably
+     * reappears at the bottom of what the player can actually see rather than wherever
+     * terrain.height happens to fall (which is not guaranteed to be on-screen, or visually
+     * distinct from ground). Mutable rather than a constructor param since the real canvas
+     * size isn't known until a surface actually exists.
+     */
+    var ceilingWrapDepthY: Float = terrain.height.toFloat()
+
     val currentTank: Tank? get() = turnManager.currentTank
     val projectiles: List<Projectile> get() = activeProjectiles
 
@@ -119,6 +131,7 @@ class GameEngine(
         ageBounceEffects(dt)
         updateBurningTanks(dt)
         updateAwaitingExplosion(dt)
+        updateExploding(dt)
         startPendingBurns()
 
         // Explosions (from projectiles still flying or still-animating impact flashes)
@@ -126,7 +139,12 @@ class GameEngine(
         // and death animations (burning, its pause, then its own closing explosion) must
         // fully finish before the turn can advance or a win can be declared.
         val explosionsDone = activeProjectiles.isEmpty() && activeImpactEffects.isEmpty()
-        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn || it.awaitingExplosion }
+        // `it.exploding` is included for clarity/defense-in-depth even though it's currently
+        // redundant against explosionsDone's activeImpactEffects.isEmpty() gate:
+        // DEATH_EXPLOSION_GROWTH_SECONDS is strictly less than the impact effect's own
+        // IMPACT_EFFECT_LIFETIME_SECONDS, so activeImpactEffects is guaranteed still
+        // non-empty for as long as any tank.exploding is true.
+        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn || it.awaitingExplosion || it.exploding }
         if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone) {
             finishResolution()
         } else {
@@ -208,7 +226,7 @@ class GameEngine(
                 if (isWall) {
                     p.x = if (p.x <= 0f) terrain.width.toFloat() else 0f
                 } else {
-                    p.y = terrain.height.toFloat()
+                    p.y = ceilingWrapDepthY
                 }
                 activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // entry point
             }
@@ -375,9 +393,27 @@ class GameEngine(
             tank.awaitingExplosionElapsed += dt
             if (tank.awaitingExplosionElapsed >= DEATH_EXPLOSION_PAUSE_SECONDS) {
                 tank.awaitingExplosion = false
-                tank.isAsh = true
+                tank.exploding = true
+                tank.explodingElapsed = 0f
                 resolveImpact(WeaponCatalog.TANK_DEATH_EXPLOSION, tank.x, tank.y)
                 pendingEvents += GameEvent.TankExploded(tank.id)
+            }
+        }
+    }
+
+    /**
+     * The death explosion's own growth phase (see [resolveImpact]'s [ImpactEffect], grown
+     * over [DEATH_EXPLOSION_GROWTH_SECONDS] by GameRenderer) - the tank body stays visible
+     * and [Tank.isAsh] stays false until the blast has actually grown to full size, so the
+     * tank doesn't vanish out from under its own still-expanding explosion.
+     */
+    private fun updateExploding(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.exploding) continue
+            tank.explodingElapsed += dt
+            if (tank.explodingElapsed >= DEATH_EXPLOSION_GROWTH_SECONDS) {
+                tank.exploding = false
+                tank.isAsh = true
             }
         }
     }
@@ -448,6 +484,12 @@ class GameEngine(
         private const val FALL_DAMAGE_PER_PIXEL = 0.4f
         private const val TANK_BURNING_DURATION_SECONDS = 2f
         private const val DEATH_EXPLOSION_PAUSE_SECONDS = 0.5f
+        // Mirrors GameRenderer's own GROWTH_SECONDS constant (the death explosion's growth
+        // sub-phase, out of its three growth/hold/fade phases) - kept separate since that
+        // split is a rendering concern, not engine state; this copy exists only so the
+        // engine knows when the tank body itself should switch to Tank.isAsh (see
+        // updateExploding), not to drive any visual growth animation itself.
+        private const val DEATH_EXPLOSION_GROWTH_SECONDS = 0.125f
         // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
         private const val BOUNCE_EFFECT_LIFETIME_SECONDS = 0.25f

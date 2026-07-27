@@ -106,6 +106,15 @@ class GameLoopThread(
                         pendingSpeechTankId,
                         pendingSpeechText,
                     )
+                    // Keeps a ceiling WRAP's reappearance point matching what the player can
+                    // actually see, not terrain.height itself (which can fall outside the
+                    // canvas's cover-fit crop - see GameEngine.ceilingWrapDepthY's doc).
+                    // Reuses this frame's own transform rather than recomputing
+                    // WorldTransform.fit a second time; this thread is the sole mutator of
+                    // engine state, so no synchronization is needed, and it self-corrects
+                    // every frame after a resize.
+                    val transform = renderer.currentTransform
+                    engine.ceilingWrapDepthY = (canvas.height - transform.offsetY) / transform.scale
                 } finally {
                     surfaceHolder.unlockCanvasAndPost(canvas)
                 }

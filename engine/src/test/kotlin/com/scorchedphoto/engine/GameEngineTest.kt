@@ -610,4 +610,113 @@ class GameEngineTest {
         // confirms it wasn't negated/scaled like a bounce would be.
         assertEquals(vyJustBefore + GRAVITY * (1f / 60f), p.vy, 0.5f)
     }
+
+    @Test
+    fun `ceiling type Wrap honors a custom ceilingWrapDepthY override`() {
+        val terrain = flatTerrain(width = 1000, groundY = 100)
+        val shooter = testTank(id = 1, ownerId = 1, x = 500f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, ceilingType = EdgeType.WRAP, rng = Random(1))
+        engine.ceilingWrapDepthY = 175f
+        shooter.angleDeg = 90f
+        shooter.power = 50f
+        engine.fire()
+
+        var wrapped = false
+        var ticks = 0
+        while (!wrapped && ticks < 200) {
+            val before = engine.projectiles.first().y
+            engine.tick(1f / 60f)
+            val after = engine.projectiles.first().y
+            if (after - before > 100f) wrapped = true
+            ticks++
+        }
+
+        assertTrue("expected the projectile to wrap to the overridden depth", wrapped)
+        val p = engine.projectiles.first()
+        assertEquals(175f, p.y, 0.01f)
+    }
+
+    @Test
+    fun `death sequence enters an exploding state before turning to ash`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
+        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
+        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = 45f
+        shooter.power = idealPower
+        assertTrue(engine.fire())
+
+        var ticks = 0
+        while (!target.exploding && ticks < 1000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the tank to reach the exploding state", target.exploding)
+        assertFalse(target.isAsh)
+        assertFalse(target.awaitingExplosion)
+    }
+
+    @Test
+    fun `tank becomes ash only after the death explosion's growth phase completes`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
+        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
+        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = 45f
+        shooter.power = idealPower
+        assertTrue(engine.fire())
+
+        var ticks = 0
+        while (!target.exploding && ticks < 1000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertTrue("expected the tank to reach the exploding state", target.exploding)
+
+        // DEATH_EXPLOSION_GROWTH_SECONDS (0.125s) at 60fps is ~7.5 ticks - a small bounded
+        // window is enough to see it complete without masking a regression that skips ahead.
+        var growthTicks = 0
+        while (target.exploding && growthTicks < 10) {
+            engine.tick(1f / 60f)
+            growthTicks++
+        }
+
+        assertTrue("expected the tank to become ash within the explosion's growth window", target.isAsh)
+        assertFalse(target.exploding)
+    }
+
+    @Test
+    fun `death explosion still fires at the same moment, only isAsh is deferred`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
+        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
+        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = 45f
+        shooter.power = idealPower
+        assertTrue(engine.fire())
+
+        val terrainBefore = terrain.groundY.copyOf()
+        var ticks = 0
+        while (!target.exploding && ticks < 1000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertTrue("expected the tank to reach the exploding state", target.exploding)
+
+        assertTrue(
+            "expected the death explosion event to already have fired",
+            engine.drainEvents().any { it is GameEvent.TankExploded && it.tankId == target.id },
+        )
+        assertTrue(
+            "expected the death explosion to already have carved terrain near the tank",
+            (450..550).any { x -> terrain.groundY[x] > terrainBefore[x] },
+        )
+    }
 }

@@ -162,6 +162,14 @@ class GameRenderer(
     private var cachedCanvasHeight = -1
     private var staticLayerDirty = true
 
+    /** The [WorldTransform] most recently used to draw the world (see [ensureStaticLayer]) -
+     * exposed so a caller holding the real canvas dimensions but no drawing responsibilities
+     * of its own (see [GameLoopThread]) can convert world coordinates to screen coordinates
+     * exactly as this frame actually rendered them, without recomputing [WorldTransform.fit]
+     * a second time. */
+    val currentTransform: WorldTransform
+        get() = cachedTransform ?: WorldTransform(1f, 0f, 0f)
+
     fun draw(
         canvas: Canvas,
         terrain: HeightMap,
@@ -247,10 +255,6 @@ class GameRenderer(
                 drawAshPile(staticCanvas, tank, transform)
                 continue
             }
-            // Neither alive nor burning also covers the silent beat between the burn
-            // animation ending and the death explosion (Tank.awaitingExplosion) - nothing
-            // is drawn there on purpose, so the explosion reads as its own distinct event.
-            if (!tank.alive && !tank.burning) continue
             val colorOverride = if (tank.id == currentTankId) flashColor else null
             drawTank(staticCanvas, tank, terrain, transform, colorOverride)
         }
@@ -713,6 +717,10 @@ class GameRenderer(
         private const val SLOPE_SAMPLE_OFFSET = 6
 
         // Explosion animation phases: grow from 0 to full over 0.125s, hold for 0.25s, fade for 0.25s.
+        // GROWTH_SECONDS also mirrors GameEngine's own DEATH_EXPLOSION_GROWTH_SECONDS
+        // constant (kept separate since this is a rendering concern, not engine state) -
+        // GameEngine uses that same duration to decide when a dying tank's body switches
+        // over to Tank.isAsh.
         private const val GROWTH_SECONDS = 0.125f
         private const val HOLD_SECONDS = 0.25f
         private const val FADE_SECONDS = 0.25f

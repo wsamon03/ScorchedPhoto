@@ -25,6 +25,10 @@ data class Tank(
     // GameEngine.updateAwaitingExplosion.
     var awaitingExplosion: Boolean = false,
     var awaitingExplosionElapsed: Float = 0f,
+    // The death explosion's own growth phase, kept visually in sync with
+    // GameRenderer.GROWTH_SECONDS - see GameEngine.updateExploding.
+    var exploding: Boolean = false,
+    var explodingElapsed: Float = 0f,
     // Set once the death explosion fires; permanent for the rest of the match - the
     // renderer draws an ash pile in place of the tank body from then on.
     var isAsh: Boolean = false,
