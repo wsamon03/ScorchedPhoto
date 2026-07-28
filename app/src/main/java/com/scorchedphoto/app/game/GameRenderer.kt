@@ -225,10 +225,12 @@ class GameRenderer(
 
         drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, bounceEffects, transform, firingTankId, firingMessage)
 
-        // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is found.
-        canvas.drawText("tick: %.1fms".format(tickMs), 16f, 40f, debugTextPaint)
-        canvas.drawText("sound: %.1fms".format(soundMs), 16f, 72f, debugTextPaint)
-        canvas.drawText("draw: %.1fms".format(drawMs), 16f, 104f, debugTextPaint)
+        // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is
+        // found. Anchored to the bottom-left (canvas.height upward) rather than a fixed
+        // top-left offset so it doesn't overlap the HUD's tank health text.
+        canvas.drawText("draw: %.1fms".format(drawMs), 16f, canvas.height - 16f, debugTextPaint)
+        canvas.drawText("sound: %.1fms".format(soundMs), 16f, canvas.height - 48f, debugTextPaint)
+        canvas.drawText("tick: %.1fms".format(tickMs), 16f, canvas.height - 80f, debugTextPaint)
     }
 
     /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
