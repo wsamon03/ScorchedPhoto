@@ -21,6 +21,11 @@ import kotlin.random.Random
 
 enum class MatchPhase { AIMING, FIRING, RESOLVING, GAME_OVER }
 
+/** A terrain collision point found by [GameEngine.findTerrainCrossing] - [x] is the swept
+ * column (as a Float, matching [GameEngine.resolveImpact]'s signature), [y] the flight
+ * path's interpolated height at that column, not the column's own raw terrain height. */
+private data class TerrainHit(val x: Float, val y: Float)
+
 /**
  * Orchestrates a full match: turn order, firing, projectile physics, terrain/tank
  * collision, crater carving, damage, tank gravity, and win detection. This is the single
@@ -165,6 +170,8 @@ class GameEngine(
         while (iterator.hasNext()) {
             val p = iterator.next()
             val wasPastApex = p.hasPassedApex
+            val prevX = p.x
+            val prevY = p.y
             stepProjectile(p, wind, dt)
 
             if (p.weapon.childCount > 1 && !wasPastApex && p.hasPassedApex) {
@@ -179,18 +186,32 @@ class GameEngine(
                 tank.alive && tank.id != p.ownerTankId &&
                     hypot((tank.x - p.x).toDouble(), (tank.y - p.y).toDouble()) < Tank.RADIUS
             }
+            // Whether a collision happens this tick is decided exactly as before (this tick's
+            // final position vs. its own column's height) - only *where* it's resolved changes,
+            // via findTerrainCrossing below - so this can never shift a collision into or out of
+            // a tick that would otherwise have gone to the wall/ceiling/fizzle branches (e.g. a
+            // shot crossing x<=0 close to the ground, meant to bounce/detonate off the wall
+            // rather than hit "terrain" at the clamped column 0).
+            val groundedThisTick = !touchedTank && p.y >= terrainY
 
             when {
-                // Impact point is always anchored to the ground surface at the
-                // projectile's own x, whether it stopped by touching a tank's body (which
-                // can happen while the projectile is still somewhat elevated - tanks are
-                // sizable now) or by reaching the ground directly - an explosion doesn't
-                // float in mid-air, and this keeps DamageCalculator's per-tank distance
-                // primarily a function of horizontal aim precision, matching how a real
-                // shot's accuracy is judged. Each affected tank's own distance to this
-                // point (not snapped to any specific tank's center) drives its damage.
-                touchedTank || p.y >= terrainY -> {
+                // Impact point is always anchored to the ground surface, never floating in
+                // mid-air - whether the projectile stopped by touching a tank's body (which
+                // can happen while still somewhat elevated - tanks are sizable now; kept
+                // anchored to *this* column's own surface height, not the tank's y, same as
+                // before) or by reaching the ground directly (see findTerrainCrossing -
+                // resolved at the actual interpolated column/height where the flight path
+                // first went solid this tick, not wherever the tick's Euler step happened to
+                // land). Each affected tank's own distance to this point (not snapped to any
+                // specific tank's center) drives its damage via DamageCalculator.
+                touchedTank -> {
                     resolveImpact(p.weapon, p.x, terrainY.toFloat())
+                    pendingEvents += GameEvent.Impact
+                    iterator.remove()
+                }
+                groundedThisTick -> {
+                    val hit = findTerrainCrossing(prevX, prevY, p.x, p.y) ?: TerrainHit(p.x, terrainY.toFloat())
+                    resolveImpact(p.weapon, hit.x, hit.y)
                     pendingEvents += GameEvent.Impact
                     iterator.remove()
                 }
@@ -203,6 +224,51 @@ class GameEngine(
         }
 
         spawned?.let { activeProjectiles += it }
+    }
+
+    /**
+     * Once a tick's own final position has already been determined to be grounded (see
+     * [tickProjectiles]'s `groundedThisTick`), walks every terrain column the projectile
+     * actually crossed to get there - from [prevX] to ([newX], [newY]), inclusive, in
+     * direction of travel - to find the *first* one whose straight-line-interpolated flight
+     * height already sits at or below (i.e. `>=`, since larger y is lower/more solid) the
+     * terrain's own surface there, rather than blindly resolving at the final column.
+     * [stepProjectile] is plain per-tick Euler integration with no substeps, so a fast,
+     * shallow shot can cross several columns in a single ~1/60s tick; a genuinely
+     * steep/near-vertical terrain step can then get skipped clean over, with the final
+     * column's own height - effectively "the top of the wall" - used instead of the height at
+     * which the flight path actually first crossed into solid ground, which can sit far lower
+     * down the wall's face. Each column is sampled at its own *exit* edge (the last,
+     * highest-y point the path actually occupies while "in" that column, given y moves
+     * monotonically within one linear Euler step) rather than its entry edge, so a tick that
+     * never crosses any column boundary reduces to exactly the final column's own check.
+     * Gravity's curvature within a single tick is small enough that this straight-line
+     * interpolation between the tick's start/end position is a reasonable approximation of the
+     * true (parabolic) sub-tick path. Returns null only if no swept column actually satisfies
+     * the condition (shouldn't happen given the caller's own precondition, but callers fall
+     * back to the final column's own height defensively rather than crash).
+     */
+    private fun findTerrainCrossing(prevX: Float, prevY: Float, newX: Float, newY: Float): TerrainHit? {
+        if (newX == prevX) return TerrainHit(newX, newY)
+        val maxColumn = terrain.width - 1
+        val startColumn = prevX.toInt().coerceIn(0, maxColumn)
+        val endColumn = newX.toInt().coerceIn(0, maxColumn)
+        val rightward = endColumn >= startColumn
+        var column = startColumn
+        while (true) {
+            val edgeX = when {
+                column == endColumn -> newX
+                rightward -> (column + 1).toFloat()
+                else -> column.toFloat()
+            }
+            val t = ((edgeX - prevX) / (newX - prevX)).coerceIn(0f, 1f)
+            val interpolatedY = prevY + t * (newY - prevY)
+            if (interpolatedY >= terrain.heightAt(column)) {
+                return TerrainHit(column.toFloat(), interpolatedY)
+            }
+            if (column == endColumn) return null
+            column += if (rightward) 1 else -1
+        }
     }
 
     /**

@@ -84,6 +84,16 @@ object CpuAimCalculator {
         return bestPower
     }
 
+    /**
+     * Known, currently-dormant mismatch: this checks only the single column [Projectile.x]
+     * lands in each simulation step, same as [com.scorchedphoto.engine.GameEngine]'s real
+     * collision resolution used to before it gained a swept multi-column check
+     * ([com.scorchedphoto.engine.GameEngine.findTerrainCrossing], for steep/near-vertical
+     * terrain steps a fast shot can cross in one tick). Every current caller only ever solves
+     * against flat terrain, where the two approaches agree, so this hasn't mattered in
+     * practice - but a future steep-terrain CPU-targeting scenario could see this solver aim
+     * for an x the real (swept) engine no longer lands a shot at.
+     */
     private fun simulateLandingX(
         shooter: Tank,
         terrain: HeightMap,

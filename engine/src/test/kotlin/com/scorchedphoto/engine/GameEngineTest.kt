@@ -311,6 +311,63 @@ class GameEngineTest {
     }
 
     @Test
+    fun `firing a fast shallow shot into a vertical wall detonates at the wall's face, not its top`() {
+        // A genuine one-column-wide vertical step: valley at x<520 (groundY=500), plateau at
+        // x>=520 (groundY=300) - the same shape TerrainSegmenter's DP-seam-plus-upscale can
+        // produce for real. A shallow, fast shot from the valley crosses several columns in a
+        // single physics tick while still near the valley's own height (not yet touching
+        // valleyY=500) - the bug this test targets: a single-final-column check would resolve
+        // the impact at that final column's raw terrain height (300, the plateau's own top
+        // surface) instead of the interpolated height at which the flight path actually first
+        // went solid.
+        val width = 1000
+        val valleyY = 500
+        val plateauY = 300
+        val groundY = IntArray(width) { x -> if (x < 520) valleyY else plateauY }
+        val terrain = HeightMap(width, valleyY + 200, groundY)
+        val shooter = testTank(id = 1, ownerId = 1, x = 400f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, rng = Random(1))
+
+        val terrainBefore = terrain.groundY.copyOf()
+        shooter.angleDeg = 10f
+        shooter.power = 80f
+        engine.fire()
+
+        var impactX: Float? = null
+        var impactY: Float? = null
+        var ticks = 0
+        while (engine.impactEffects.isEmpty() && engine.projectiles.isNotEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        engine.impactEffects.firstOrNull()?.let {
+            impactX = it.x
+            impactY = it.y
+        }
+
+        assertNotNull("expected the shot to detonate against the wall", impactX)
+        assertTrue(
+            "expected the impact right at the wall's own column (x=520), not lofted deep into " +
+                "the plateau by skipping several columns in one tick; was $impactX",
+            impactX!! in 515f..525f,
+        )
+        assertTrue(
+            "expected the impact near the wall's actual face height (close to the valley's own " +
+                "~$valleyY), not teleported up to the plateau's top surface (y=$plateauY); was $impactY",
+            impactY!! > 400f,
+        )
+
+        runUntilNotResolving(engine)
+
+        assertTrue(
+            "expected the valley-side ground right at the wall's base to be carved into (the " +
+                "projectile hit the wall's side) - a bug that resolves at the plateau's top " +
+                "instead leaves these columns completely untouched",
+            (500..519).any { x -> terrain.groundY[x] > terrainBefore[x] },
+        )
+    }
+
+    @Test
     fun `a well-aimed shot reliably deals at least full damage to a fully healthy tank`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val shooter = testTank(id = 1, ownerId = 1, x = 300f)
