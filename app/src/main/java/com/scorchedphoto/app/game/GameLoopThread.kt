@@ -36,6 +36,11 @@ class GameLoopThread(
     @Volatile
     var running: Boolean = false
 
+    // TEMP DIAGNOSTIC (see plan doc) - last frame's total draw-step duration (lockCanvas
+    // through unlockCanvasAndPost), reported into the next frame's draw call since it isn't
+    // known until after this frame's canvas is already finished.
+    private var lastDrawMs: Float = 0f
+
     private val cpuRandom = Random(System.nanoTime())
     private var cpuThinkingElapsed = 0f
     private var cpuThinkingForTankId: Int? = null
@@ -77,6 +82,7 @@ class GameLoopThread(
             advancePendingSpeech(frameDeltaSeconds)
             advancePendingFire(frameDeltaSeconds)
 
+            val tickStartNanos = System.nanoTime()
             var ticked = false
             while (accumulator >= FIXED_DT) {
                 maybeTakeCpuTurn(FIXED_DT)
@@ -88,9 +94,16 @@ class GameLoopThread(
             if (ticked) {
                 onStateChanged()
             }
+            // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause
+            // is found; tickMs also folds in drainAndApplyCommands/advancePendingSpeech/
+            // advancePendingFire above, which are normally negligible.
+            val tickMs = (System.nanoTime() - tickStartNanos) / 1_000_000f
 
+            val soundStartNanos = System.nanoTime()
             updateSound()
+            val soundMs = (System.nanoTime() - soundStartNanos) / 1_000_000f
 
+            val drawStartNanos = System.nanoTime()
             val canvas = surfaceHolder.lockCanvas()
             if (canvas != null) {
                 try {
@@ -105,6 +118,9 @@ class GameLoopThread(
                         engine.phase,
                         pendingSpeechTankId,
                         pendingSpeechText,
+                        tickMs,
+                        soundMs,
+                        lastDrawMs,
                     )
                     // Keeps a ceiling WRAP's reappearance point matching what the player can
                     // actually see, not terrain.height itself (which can fall outside the
@@ -119,6 +135,10 @@ class GameLoopThread(
                     surfaceHolder.unlockCanvasAndPost(canvas)
                 }
             }
+            // TEMP DIAGNOSTIC - includes lockCanvas/unlockCanvasAndPost, which can themselves
+            // block on the display; reported to the *next* frame's draw call since this
+            // frame's canvas is already finished by the time it's known.
+            lastDrawMs = (System.nanoTime() - drawStartNanos) / 1_000_000f
 
             val elapsedNanos = System.nanoTime() - frameStartNanos
             val sleepNanos = TARGET_FRAME_NANOS - elapsedNanos

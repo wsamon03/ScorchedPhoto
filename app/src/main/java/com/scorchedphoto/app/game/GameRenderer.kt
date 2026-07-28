@@ -81,6 +81,14 @@ class GameRenderer(
         textAlign = Paint.Align.CENTER
     }
 
+    // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is found.
+    private val debugTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.YELLOW
+        textSize = 28f
+        textAlign = Paint.Align.LEFT
+        setShadowLayer(4f, 0f, 0f, Color.BLACK)
+    }
+
     // Reused every call rather than allocated fresh - drawSpeechBubble runs every frame for
     // the full ~2s duration of every pre-fire/death taunt, so this is a hot path. Safe to
     // share: each call fully finishes drawing (paths are consumed synchronously by
@@ -181,6 +189,9 @@ class GameRenderer(
         phase: MatchPhase,
         firingTankId: Int? = null,
         firingMessage: String? = null,
+        tickMs: Float = 0f,
+        soundMs: Float = 0f,
+        drawMs: Float = 0f,
     ) {
         ensureStaticLayer(canvas.width, canvas.height, terrain)
         val transform = cachedTransform!!
@@ -213,6 +224,11 @@ class GameRenderer(
         canvas.drawBitmap(staticLayerBitmap!!, 0f, 0f, null)
 
         drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, bounceEffects, transform, firingTankId, firingMessage)
+
+        // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is found.
+        canvas.drawText("tick: %.1fms".format(tickMs), 16f, 40f, debugTextPaint)
+        canvas.drawText("sound: %.1fms".format(soundMs), 16f, 72f, debugTextPaint)
+        canvas.drawText("draw: %.1fms".format(drawMs), 16f, 104f, debugTextPaint)
     }
 
     /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
