@@ -38,15 +38,9 @@ class GameSurfaceView(
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        // Reaching gameplay via the gallery photo picker (a separate system Activity, causing
-        // a real onPause/onResume + Surface recreation) rather than the embedded camera capture
-        // flow (never leaves this Activity) can leave an adaptive-refresh-rate display defaulted
-        // to a low rate for this freshly created Surface - explicitly asserting the fixed 60fps
-        // this game loop actually renders at avoids that throttling regardless of which screen
-        // flow got the player here.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            holder.surface.setFrameRate(TARGET_FPS, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
-        }
+        // See requestTargetFrameRate's doc - this early call is just a hint, since a rotation
+        // can still be in flight when this fires.
+        requestTargetFrameRate(holder)
         val thread = GameLoopThread(
             holder,
             engine,
@@ -62,7 +56,25 @@ class GameSurfaceView(
         loopThread = thread
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        // MainActivity's android:configChanges handles rotation in place (no Activity/Surface
+        // recreation), so this - not surfaceCreated - is where a rotation-driven resize's real,
+        // settled geometry actually lands. Reasserting here matters most for players who are
+        // still physically rotating the phone to landscape as this screen appears (e.g. picking
+        // a portrait-oriented gallery photo while holding the phone upright to browse it, then
+        // rotating right as gameplay starts) - surfaceCreated's vote can fire before that
+        // rotation has settled and silently fail to stick, which is what left the display
+        // flapping between 60Hz and ~10Hz for the whole match instead of holding a steady 60.
+        requestTargetFrameRate(holder)
+    }
+
+    /** Requests this surface's fixed 60fps target - see surfaceChanged's doc for why this needs
+     * reasserting on resize, not just once at surfaceCreated. */
+    private fun requestTargetFrameRate(holder: SurfaceHolder) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.surface.setFrameRate(TARGET_FPS, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE)
+        }
+    }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         loopThread?.let {
@@ -76,7 +88,7 @@ class GameSurfaceView(
         private const val SURFACE_TEARDOWN_JOIN_TIMEOUT_MS = 500L
 
         // Matches GameLoopThread's own fixed-timestep target (1/60s ticks) - see
-        // surfaceCreated's setFrameRate call.
+        // requestTargetFrameRate.
         private const val TARGET_FPS = 60f
     }
 }
