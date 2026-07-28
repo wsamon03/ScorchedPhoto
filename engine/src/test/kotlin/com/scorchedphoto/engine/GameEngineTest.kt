@@ -606,7 +606,10 @@ class GameEngineTest {
             "expected an explosion near the map's bottom edge (terrain.height=300), not the surface",
             engine.impactEffects.any { it.y in 299f..301f },
         )
-        assertEquals(285, terrain.groundY[shooter.x.toInt()])
+        // The shooter's own column had 200 units of material above the hole's top (300), far
+        // more than the hole's 28-unit height (blastRadius) - it drops by exactly that much:
+        // 100 + 28 = 128.
+        assertEquals(128, terrain.groundY[shooter.x.toInt()])
     }
 
     @Test
@@ -630,14 +633,16 @@ class GameEngineTest {
             "expected the explosion at the overridden depth, not the default terrain height",
             engine.impactEffects.any { it.y in 174f..176f },
         )
-        // STANDARD_SHELL's blastRadius (28) added directly to the override at the impact
-        // column, well under the 285 clamp used above - proves the detonation reads the
-        // mutable property, not a hardcoded terrain.height value.
-        assertEquals(203, terrain.groundY[shooter.x.toInt()])
+        // The 28-unit hole height (blastRadius) is still the bottleneck here, not the
+        // override's own depth (75 units of material sit above it, plenty) - same result as
+        // the default-depth test above: 100 + 28 = 128. The impactEffects assertion above is
+        // what actually proves the override is honored (300 vs. 175); this just confirms the
+        // collapse math doesn't change depending on how deep the override happens to be.
+        assertEquals(128, terrain.groundY[shooter.x.toInt()])
     }
 
     @Test
-    fun `ceiling type Wrap collapses a tall peak down to fill the blast, without touching distant terrain`() {
+    fun `ceiling type Wrap drops a tall peak's terrain down by the explosion's own size`() {
         val width = 1000
         val height = 1000
         val peakX = 500
@@ -656,10 +661,11 @@ class GameEngineTest {
         }
 
         assertTrue("expected the wrapped projectile to detonate", engine.projectiles.isEmpty())
-        // 0.95 * height(1000) = 950 - the peak's column (started at 200) collapses all the way
-        // down to that floor, exactly like a real mountain sinking to fill a hole blown out
-        // from underneath it.
-        assertEquals(950, terrain.groundY[peakX])
+        // 800 units of material sit above the hole's top (the default ceilingWrapDepthY,
+        // terrain.height=1000) - far more than the hole's own 28-unit height (blastRadius) at
+        // the peak's own column - so it drops by exactly that much: 200 + 28 = 228, not an
+        // erasure down to some fixed depth.
+        assertEquals(228, terrain.groundY[peakX])
         assertEquals("expected terrain far outside the blast radius to be untouched", 900, terrain.groundY[peakX + 200])
     }
 

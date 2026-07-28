@@ -70,4 +70,26 @@ class CraterCarverTest {
         CraterCarver.carve(terrain, impactX = 10, impactY = 25, radius = -5)
         assertEquals(before.toList(), terrain.groundY.toList())
     }
+
+    @Test
+    fun `terrain resting above a deep explosion drops down to fill the hole when enough material exists`() {
+        val terrain = flatTerrain(width = 20, height = 1000, groundY = 100)
+        CraterCarver.carve(terrain, impactX = 5, impactY = 300, radius = 10)
+
+        // 200 units of material sit above the hole's top (300) - far more than the hole's own
+        // 10-unit height at the center column - so it drops by exactly the hole's height,
+        // fully filling it: 100 + 10 = 110.
+        assertEquals(110, terrain.groundY[5])
+    }
+
+    @Test
+    fun `insufficient material above the hole only drops by what actually exists`() {
+        val terrain = flatTerrain(width = 20, height = 1000, groundY = 198)
+        CraterCarver.carve(terrain, impactX = 5, impactY = 200, radius = 10)
+
+        // Only 2 units of material exist above the hole's top (200) - far less than the
+        // hole's own 10-unit height at the center column - so it can only drop by the 2 units
+        // that exist, landing exactly at the hole's top rather than fully filling it.
+        assertEquals(200, terrain.groundY[5])
+    }
 }
