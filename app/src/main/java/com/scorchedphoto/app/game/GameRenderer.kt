@@ -30,14 +30,18 @@ import kotlin.math.sin
  * through a single [WorldTransform.fit] (see its doc for why: independent x/y scale
  * factors distort launch angles and motion).
  *
- * Split into a cached **static layer** (background, crater scars, horizon line, tank
- * bodies/barrels, ash piles) and a **dynamic overlay** drawn fresh every frame on top
- * (projectiles, impact flashes, burning-tank fire/bubble, the pre-fire speech bubble) - see
- * [redrawStaticLayer]/[staticLayerDirty] doc for why: none of the static content can
- * actually change while [MatchPhase.FIRING] (verified against every mutation site in
- * `GameEngine`, including MIRV's split-child impacts, which always land during
- * `RESOLVING`), so re-clearing the canvas, redrawing the background photo, and rebuilding
- * the crater/horizon paths every single frame during a shot's flight was pure waste.
+ * Split into three tiers, cheapest-to-invalidate first: a cached **terrain layer** (background
+ * photo, crater scars, horizon line - see [redrawTerrainLayer]), a cached **static layer** on
+ * top of it (tank bodies/barrels, ash piles - see [redrawStaticLayer]), and a **dynamic
+ * overlay** drawn fresh every frame on top of both (projectiles, impact flashes, burning-tank
+ * fire/bubble, the pre-fire speech bubble). The terrain layer only changes when the terrain
+ * itself does (a crater) or the canvas resizes; the static layer additionally redraws whenever
+ * [MatchPhase.FIRING] isn't active (verified against every mutation site in `GameEngine`,
+ * including MIRV's split-child impacts, which always land during `RESOLVING`) since a tank's
+ * turn-flash color/aim state can change then. Splitting these two apart matters because the
+ * terrain layer's anti-aliased horizon/crater stroke work is real, non-trivial CPU cost on a
+ * software `Canvas` (worse for a visually busy/jagged segmented terrain) that has no reason to
+ * repeat every single `AIMING` frame when nothing about the terrain changed.
  */
 class GameRenderer(
     private val context: Context,
@@ -154,21 +158,30 @@ class GameRenderer(
     private var flashTankId: Int? = null
     private var flashStartNanos: Long = 0L
 
-    // The cached static-layer bitmap/canvas (background, crater scars, horizon line, tank
-    // bodies/barrels, ash piles) plus the WorldTransform it was drawn with - recreated only
-    // when the real canvas's size changes (WorldTransform depends solely on canvas size and
-    // terrain size, and terrain size is fixed for a match). staticLayerDirty forces a redraw
-    // whenever any of that content could have changed - see draw()'s doc for the exact
-    // conditions. IMPORTANT for future maintainers: any new mutation that changes a tank's
-    // drawn appearance (or the terrain) outside of MatchPhase.FIRING is already covered by
-    // the phase check below, but anything that could change *during* FIRING needs to either
-    // avoid doing so or explicitly set staticLayerDirty = true.
+    // The cached static-layer bitmap/canvas (tank bodies/barrels, ash piles, drawn on top of
+    // the terrain layer below) plus the WorldTransform it was drawn with - recreated only when
+    // the real canvas's size changes (WorldTransform depends solely on canvas size and terrain
+    // size, and terrain size is fixed for a match). staticLayerDirty forces a redraw whenever
+    // any of that content could have changed - see draw()'s doc for the exact conditions.
+    // IMPORTANT for future maintainers: any new mutation that changes a tank's drawn appearance
+    // outside of MatchPhase.FIRING is already covered by the phase check below, but anything
+    // that could change *during* FIRING needs to either avoid doing so or explicitly set
+    // staticLayerDirty = true.
     private var staticLayerBitmap: Bitmap? = null
     private var staticLayerCanvas: Canvas? = null
     private var cachedTransform: WorldTransform? = null
     private var cachedCanvasWidth = -1
     private var cachedCanvasHeight = -1
     private var staticLayerDirty = true
+
+    // The cached terrain-layer bitmap/canvas (background photo, crater scars, horizon line) -
+    // see the class doc for why this is split from staticLayerBitmap above. Resized alongside
+    // it, but its own dirty flag only flips on a resize or when terrain.version has actually
+    // advanced (see redrawTerrainLayer) - never merely because the match phase changed.
+    private var terrainLayerBitmap: Bitmap? = null
+    private var terrainLayerCanvas: Canvas? = null
+    private var terrainLayerDirty = true
+    private var cachedTerrainVersion = -1
 
     /** The [WorldTransform] most recently used to draw the world (see [ensureStaticLayer]) -
      * exposed so a caller holding the real canvas dimensions but no drawing responsibilities
@@ -196,6 +209,18 @@ class GameRenderer(
     ) {
         ensureStaticLayer(canvas.width, canvas.height, terrain)
         val transform = cachedTransform!!
+
+        // The terrain layer (photo, crater scars, horizon line) only needs redrawing when it
+        // resized (ensureStaticLayer already set terrainLayerDirty for that) or the terrain
+        // itself actually changed (a crater carved during RESOLVING) - never merely because the
+        // match phase changed, unlike the tank layer below. When it does redraw, the tank layer
+        // must too, since it's drawn on top of the terrain layer's own bitmap.
+        if (terrainLayerDirty || terrain.version != cachedTerrainVersion) {
+            redrawTerrainLayer(terrain, transform)
+            terrainLayerDirty = false
+            cachedTerrainVersion = terrain.version
+            staticLayerDirty = true
+        }
 
         if (currentTankId != flashTankId) {
             flashTankId = currentTankId
@@ -237,27 +262,38 @@ class GameRenderer(
         canvas.drawText("tick: %.1fms".format(tickMs), 16f, canvas.height - 112f, debugTextPaint)
     }
 
-    /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
-     * size differs from what's cached, and marks the layer dirty so it's redrawn at its new
-     * size on the next call - handles both the very first frame (cachedCanvasWidth starts at
-     * -1, guaranteed to differ) and any later resize (e.g. rotation). */
+    /** (Re)creates the cached static- and terrain-layer bitmaps/canvases/transform whenever the
+     * real canvas's size differs from what's cached, and marks both layers dirty so they're
+     * redrawn at their new size on the next call - handles both the very first frame
+     * (cachedCanvasWidth starts at -1, guaranteed to differ) and any later resize (e.g. a
+     * rotation that recreates the underlying Surface - see GameScreen's own doc on that). */
     private fun ensureStaticLayer(canvasWidth: Int, canvasHeight: Int, terrain: HeightMap) {
         if (staticLayerBitmap != null && cachedCanvasWidth == canvasWidth && cachedCanvasHeight == canvasHeight) return
         val bitmap = Bitmap.createBitmap(canvasWidth, canvasHeight, Bitmap.Config.ARGB_8888)
         staticLayerBitmap = bitmap
         staticLayerCanvas = Canvas(bitmap)
+        val terrainBitmap = Bitmap.createBitmap(canvasWidth, canvasHeight, Bitmap.Config.ARGB_8888)
+        terrainLayerBitmap = terrainBitmap
+        terrainLayerCanvas = Canvas(terrainBitmap)
         cachedCanvasWidth = canvasWidth
         cachedCanvasHeight = canvasHeight
         cachedTransform = WorldTransform.fit(canvasWidth.toFloat(), canvasHeight.toFloat(), terrain.width.toFloat(), terrain.height.toFloat())
         staticLayerDirty = true
+        terrainLayerDirty = true
     }
 
-    /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
-     * doc - into [staticLayerCanvas]: the background photo, crater scars, horizon line, and
-     * every tank's body/barrel or ash pile. */
-    private fun redrawStaticLayer(terrain: HeightMap, tanks: List<Tank>, transform: WorldTransform, currentTankId: Int?, flashColor: Int?) {
-        val staticCanvas = staticLayerCanvas ?: return
-        staticCanvas.drawColor(Color.BLACK)
+    /** Draws the parts of the world that only change when the terrain itself does - a resize,
+     * or a crater carved during RESOLVING (see [HeightMap.version], checked by [draw]) - into
+     * [terrainLayerCanvas]: the background photo, crater scars, and horizon line. Split out from
+     * [redrawStaticLayer] (tanks/ash piles/turn-flash) because unlike that content, none of this
+     * ever changes during AIMING - most of a match's real elapsed time - so redrawing it every
+     * non-FIRING frame, as the combined layer used to, was pure waste; for a visually busy/
+     * jagged segmented terrain the anti-aliased horizon/crater stroke work here is expensive
+     * enough on this software `Canvas` to cause real, measured multi-hundred-millisecond frame
+     * stalls repeated every single frame. */
+    private fun redrawTerrainLayer(terrain: HeightMap, transform: WorldTransform) {
+        val terrainCanvas = terrainLayerCanvas ?: return
+        terrainCanvas.drawColor(Color.BLACK)
 
         if (photo != null && srcRect != null) {
             backgroundRect.set(
@@ -266,11 +302,24 @@ class GameRenderer(
                 transform.screenX(terrain.width.toFloat()),
                 transform.screenY(terrain.height.toFloat()),
             )
-            staticCanvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
+            terrainCanvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
         }
 
-        drawCraterScars(staticCanvas, terrain, transform)
-        drawHorizonLine(staticCanvas, terrain, transform)
+        drawCraterScars(terrainCanvas, terrain, transform)
+        drawHorizonLine(terrainCanvas, terrain, transform)
+    }
+
+    /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
+     * doc - into [staticLayerCanvas]: the cached terrain layer as a base, then every tank's
+     * body/barrel or ash pile on top. */
+    private fun redrawStaticLayer(terrain: HeightMap, tanks: List<Tank>, transform: WorldTransform, currentTankId: Int?, flashColor: Int?) {
+        val staticCanvas = staticLayerCanvas ?: return
+        val terrainBitmap = terrainLayerBitmap
+        if (terrainBitmap != null) {
+            staticCanvas.drawBitmap(terrainBitmap, 0f, 0f, null)
+        } else {
+            staticCanvas.drawColor(Color.BLACK)
+        }
 
         for (tank in tanks) {
             if (tank.isAsh) {

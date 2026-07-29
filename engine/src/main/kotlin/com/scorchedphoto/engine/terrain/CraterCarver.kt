@@ -24,6 +24,7 @@ object CraterCarver {
         val minColumn = max(0, impactX - radius)
         val maxColumn = min(terrain.width - 1, impactX + radius)
         val flooredMaxY = (terrain.height * MAX_DEPTH_FRACTION).roundToInt()
+        var changed = false
 
         for (x in minColumn..maxColumn) {
             val dx = x - impactX
@@ -48,7 +49,12 @@ object CraterCarver {
                 // crater, carved straight down from wherever the ground already was.
                 max(existingGroundY, explosionBottomY)
             }
-            terrain.groundY[x] = newGroundY.coerceAtMost(flooredMaxY)
+            val clampedGroundY = newGroundY.coerceAtMost(flooredMaxY)
+            if (clampedGroundY != existingGroundY) {
+                terrain.groundY[x] = clampedGroundY
+                changed = true
+            }
         }
+        if (changed) terrain.version++
     }
 }
