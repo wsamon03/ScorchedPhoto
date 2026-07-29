@@ -7,20 +7,24 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 /**
- * Carves a semicircular crater into a [HeightMap] in place. Only ever lowers solidity
- * (groundY only increases, never decreases) and clamps to a maximum depth so a crater
- * can never dig all the way through to the bottom of the frame. When the explosion is
- * genuinely embedded - deeper than every column's own original surface across the whole
- * blast radius (e.g. a deep detonation under a hill - currently only ceiling
- * [com.scorchedphoto.engine.EdgeType.WRAP], which teleports well below any real terrain
- * height), the terrain resting above it collapses straight down to fill the hole - by
- * exactly the hole's own height there, or less if not enough material exists above it -
- * rather than simply being erased down to the impact depth (see [carve]'s body). That
- * choice is made once per explosion, not independently per column: comparing each column's
- * own, possibly noisy/undulating (or, at a real wall/cliff, discontinuous) original height
- * against the impact depth let the two formulas interleave column-by-column across a single
- * crater, producing sharp discontinuities - straight edges and right-angle corners - instead
- * of the smooth circular hollow an ordinary surface explosion should leave.
+ * Carves a circular blast into a [HeightMap] in place, one column at a time, using a single
+ * rule with no special-casing between an ordinary surface hit and a deep/embedded one:
+ * - The blast at column `x` destroys everything from `impactY - craterDepth(x)` down to
+ *   `impactY + craterDepth(x)` (a full circle, not just its lower half).
+ * - Whatever solid terrain is left resting above that hole - none of it, for an ordinary
+ *   surface hit, since the top of the circle is already above the original surface there -
+ *   drops straight down to close the gap, by exactly however much was destroyed beneath it.
+ * Expressed as a single clamp (see [carve]'s body) rather than two branches picked between
+ * per column or per explosion: `groundY[x]` only ever moves to somewhere between its own
+ * current value (an ordinary hit reaching nowhere near it: unchanged) and that same value
+ * plus the hole's full height there (an ordinary hit whose circle bottom lands beyond it, or
+ * a genuinely embedded hit: the hole closes completely). This is what makes an explosion on
+ * undulating terrain read as one smooth circular hollow instead of jagged, right-angled
+ * edges - the old per-column/per-explosion branch between two differently-shaped formulas
+ * (kept around only for a genuinely embedded case, e.g. ceiling
+ * [com.scorchedphoto.engine.EdgeType.WRAP]) disagreed at the point a column crossed between
+ * them. Only ever lowers solidity (groundY only increases, never decreases) and clamps to a
+ * maximum depth so a crater can never dig all the way through to the bottom of the frame.
  */
 object CraterCarver {
 
@@ -33,21 +37,6 @@ object CraterCarver {
         val flooredMaxY = (terrain.height * MAX_DEPTH_FRACTION).roundToInt()
         var changed = false
 
-        // See the class doc for why this is decided once for the whole explosion, rather than
-        // per column. Uses the deepest (largest groundY) original surface anywhere in the
-        // blast's column range, not just the exact impact column - a real wall/cliff can put
-        // the impact column itself on the shallow side of a step even though the blast is an
-        // ordinary lateral hit, not a genuine embedded detonation (a fast shallow shot into a
-        // vertical wall, for instance, can land exactly on the far/shallow side of the step).
-        // Only when impactY is deeper than literally every column's own original surface in
-        // range is every column actually embedded in what was already solid ground - the
-        // ceiling-WRAP case this branch exists for.
-        var deepestGroundYInRange = Int.MIN_VALUE
-        for (x in minColumn..maxColumn) {
-            if (terrain.groundY[x] > deepestGroundYInRange) deepestGroundYInRange = terrain.groundY[x]
-        }
-        val isDeepImpact = impactY > deepestGroundYInRange
-
         for (x in minColumn..maxColumn) {
             val dx = x - impactX
             val remainingSquared = radius * radius - dx * dx
@@ -56,30 +45,24 @@ object CraterCarver {
             val explosionBottomY = (impactY + craterDepth).roundToInt()
             val existingGroundY = terrain.groundY[x]
 
-            val newGroundY = if (isDeepImpact) {
-                // There's solid terrain resting above the hole with nothing left to hold it
-                // up. That block drops straight down by exactly how tall the explosion is
-                // here, capped by however much material actually exists above it (never
-                // more) - so the hole fills exactly, or only partially if there wasn't enough
-                // terrain above to fill it completely. Clamped to >= 0: the impact-column-wide
-                // decision above no longer guarantees every column's own surface sits above
-                // impactY the way a per-column check used to - not reachable by the real
-                // ceiling-WRAP case (impactY there is far deeper than any realistic column's
-                // surface), but keeps "terrain only ever lowers" airtight regardless.
-                val explosionHeight = explosionBottomY - impactY
-                val solidAboveSize = max(0, impactY - existingGroundY)
-                existingGroundY + min(explosionHeight, solidAboveSize)
-            } else {
-                // The explosion directly overlaps/touches the existing surface - an ordinary
-                // crater, carved straight down from wherever the ground already was.
-                max(existingGroundY, explosionBottomY)
-            }
-            // coerceAtLeast first, then coerceAtMost (not a single coerceIn): terrain outside
-            // this class's own control can already sit below flooredMaxY's usual depth (e.g. a
-            // large scripted ground drop), and coerceIn throws if its lower bound ends up
-            // greater than its upper one - "never lower than existingGroundY" wins in that case,
-            // simply leaving the depth floor unable to raise it back up.
-            val clampedGroundY = newGroundY.coerceAtLeast(existingGroundY).coerceAtMost(flooredMaxY)
+            // The blast's full vertical extent at this column (top to bottom of the circle,
+            // not just its lower half) - the most this column's surface can possibly drop by,
+            // whether that's ordinary erosion or material collapsing to fill a hole beneath it.
+            val holeHeight = (2f * craterDepth).roundToInt()
+
+            // Below existingGroundY: the blast doesn't reach this column at all (unchanged).
+            // Above existingGroundY + holeHeight: the blast's circle here started strictly
+            // below the original surface, so once destroyed there's nothing left to hold up
+            // the material that was resting above it - that material drops to close the gap,
+            // filling the hole completely (capped here by the hole's own full height, since
+            // there's always at least that much solid material above it in that case - the
+            // original surface itself sat below the circle's top for this branch to apply).
+            // In between (the ordinary case: the circle's top is already above the original
+            // surface, nothing to collapse): this reduces to plain erosion down to
+            // explosionBottomY, identical to the old "ordinary" formula.
+            val newGroundY = explosionBottomY.coerceIn(existingGroundY, existingGroundY + holeHeight)
+
+            val clampedGroundY = newGroundY.coerceAtMost(flooredMaxY)
             if (clampedGroundY != existingGroundY) {
                 terrain.groundY[x] = clampedGroundY
                 changed = true

@@ -72,24 +72,32 @@ class CraterCarverTest {
     }
 
     @Test
-    fun `terrain resting above a deep explosion drops down to fill the hole when enough material exists`() {
+    fun `a genuinely embedded explosion collapses the material above down to fill the hole completely`() {
+        // The blast's own circle at the center column spans 290..310 (impactY +- radius) -
+        // entirely below the original surface (100), so this column is genuinely embedded:
+        // everything from 100 to 310 gets destroyed, and there's plenty of material above
+        // (100..290) to fully close the resulting hole. It drops by exactly the hole's own
+        // full height (2 * radius = 20), landing at 100 + 20 = 120 - never further, however
+        // much material actually exists above it.
         val terrain = flatTerrain(width = 20, height = 1000, groundY = 100)
         CraterCarver.carve(terrain, impactX = 5, impactY = 300, radius = 10)
 
-        // 200 units of material sit above the hole's top (300) - far more than the hole's own
-        // 10-unit height at the center column - so it drops by exactly the hole's height,
-        // fully filling it: 100 + 10 = 110.
-        assertEquals(110, terrain.groundY[5])
+        assertEquals(120, terrain.groundY[5])
     }
 
     @Test
-    fun `insufficient material above the hole only drops by what actually exists`() {
-        val terrain = flatTerrain(width = 20, height = 1000, groundY = 198)
-        CraterCarver.carve(terrain, impactX = 5, impactY = 200, radius = 10)
+    fun `terrain whose surface sits below the blast's own top erodes directly, not via collapse`() {
+        // The blast's own circle at the center column still spans 290..310, but this
+        // column's original surface (295) already sits below the circle's top (290) - i.e.
+        // there's no material resting above the hole to collapse, even though the surface is
+        // itself below the impact point (300). This is exactly the case the old per-column/
+        // per-explosion "is this column embedded" check used to misjudge, producing jagged
+        // edges on ordinary undulating terrain: the single unified formula instead resolves
+        // it as plain erosion straight down to the circle's own bottom (310), identical to an
+        // ordinary surface hit.
+        val terrain = flatTerrain(width = 20, height = 1000, groundY = 295)
+        CraterCarver.carve(terrain, impactX = 5, impactY = 300, radius = 10)
 
-        // Only 2 units of material exist above the hole's top (200) - far less than the
-        // hole's own 10-unit height at the center column - so it can only drop by the 2 units
-        // that exist, landing exactly at the hole's top rather than fully filling it.
-        assertEquals(200, terrain.groundY[5])
+        assertEquals(310, terrain.groundY[5])
     }
 }
