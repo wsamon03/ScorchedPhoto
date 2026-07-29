@@ -191,6 +191,7 @@ class GameRenderer(
         firingMessage: String? = null,
         tickMs: Float = 0f,
         soundMs: Float = 0f,
+        lockMs: Float = 0f,
         drawMs: Float = 0f,
     ) {
         ensureStaticLayer(canvas.width, canvas.height, terrain)
@@ -227,10 +228,13 @@ class GameRenderer(
 
         // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is
         // found. Anchored to the bottom-left (canvas.height upward) rather than a fixed
-        // top-left offset so it doesn't overlap the HUD's tank health text.
+        // top-left offset so it doesn't overlap the HUD's tank health text. "lock" isolates
+        // lockCanvas()'s wait on the display compositor from "draw"'s own CPU-side Canvas
+        // work, so a spike in one vs. the other points to a very different cause.
         canvas.drawText("draw: %.1fms".format(drawMs), 16f, canvas.height - 16f, debugTextPaint)
-        canvas.drawText("sound: %.1fms".format(soundMs), 16f, canvas.height - 48f, debugTextPaint)
-        canvas.drawText("tick: %.1fms".format(tickMs), 16f, canvas.height - 80f, debugTextPaint)
+        canvas.drawText("lock: %.1fms".format(lockMs), 16f, canvas.height - 48f, debugTextPaint)
+        canvas.drawText("sound: %.1fms".format(soundMs), 16f, canvas.height - 80f, debugTextPaint)
+        canvas.drawText("tick: %.1fms".format(tickMs), 16f, canvas.height - 112f, debugTextPaint)
     }
 
     /** (Re)creates the cached static-layer bitmap/canvas/transform whenever the real canvas's
