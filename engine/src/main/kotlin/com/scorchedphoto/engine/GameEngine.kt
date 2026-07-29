@@ -325,8 +325,8 @@ class GameEngine(
     }
 
     private fun velocityRetention(edgeType: EdgeType): Float = when (edgeType) {
-        EdgeType.PADDED -> 0.2f
-        EdgeType.RUBBER -> 0.6f
+        EdgeType.PADDED -> 0.1f
+        EdgeType.RUBBER -> 0.45f
         EdgeType.SPRING -> 1.2f
         EdgeType.REFLECTIVE -> 1.0f
         else -> error("velocityRetention called for non-bounce EdgeType $edgeType")

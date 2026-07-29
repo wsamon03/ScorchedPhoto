@@ -44,11 +44,15 @@ class GameSetupViewModel @Inject constructor(
     private val _tankConfigs = MutableStateFlow(defaultConfigs(MIN_TANKS))
     val tankConfigs: StateFlow<List<TankConfig>> = _tankConfigs.asStateFlow()
 
-    private val _wallType = MutableStateFlow(EdgeType.NONE)
-    val wallType: StateFlow<EdgeType> = _wallType.asStateFlow()
+    // Null means "Random" is currently selected in the settings UI - resolved to one concrete
+    // EdgeType (see commitAndStart) only once the match actually starts, so it's chosen fresh
+    // per match but then stays fixed - never re-rolled mid-match, and never reaches MatchConfig/
+    // GameEngine as a live "random" value.
+    private val _wallType = MutableStateFlow<EdgeType?>(EdgeType.NONE)
+    val wallType: StateFlow<EdgeType?> = _wallType.asStateFlow()
 
-    private val _ceilingType = MutableStateFlow(EdgeType.NONE)
-    val ceilingType: StateFlow<EdgeType> = _ceilingType.asStateFlow()
+    private val _ceilingType = MutableStateFlow<EdgeType?>(EdgeType.NONE)
+    val ceilingType: StateFlow<EdgeType?> = _ceilingType.asStateFlow()
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
@@ -130,16 +134,21 @@ class GameSetupViewModel @Inject constructor(
         deathLineSpeaker.speak("Hello, my name is $voiceName", config.voiceId, config.pitch, config.speechRate)
     }
 
-    fun setWallType(type: EdgeType) {
+    fun setWallType(type: EdgeType?) {
         _wallType.value = type
     }
 
-    fun setCeilingType(type: EdgeType) {
+    fun setCeilingType(type: EdgeType?) {
         _ceilingType.value = type
     }
 
+    /** Resolves "Random" (a null wallType/ceilingType) to one concrete EdgeType per side, each
+     * independently, right before the match starts - see _wallType's doc for why this is the
+     * one place that needs to happen. */
     fun commitAndStart() {
-        matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value, _wallType.value, _ceilingType.value)
+        val resolvedWallType = _wallType.value ?: EdgeType.entries.random()
+        val resolvedCeilingType = _ceilingType.value ?: EdgeType.entries.random()
+        matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value, resolvedWallType, resolvedCeilingType)
     }
 
     private fun updateAt(index: Int, transform: (TankConfig) -> TankConfig) {

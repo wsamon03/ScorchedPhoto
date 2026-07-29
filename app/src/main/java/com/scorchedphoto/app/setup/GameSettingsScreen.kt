@@ -48,13 +48,20 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun EdgeTypeDropdown(selected: EdgeType, onSelect: (EdgeType) -> Unit) {
+private fun EdgeTypeDropdown(selected: EdgeType?, onSelect: (EdgeType?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         Button(onClick = { expanded = true }) {
-            Text(selected.displayName)
+            Text(selected?.displayName ?: "Random")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text("Random") },
+                onClick = {
+                    onSelect(null)
+                    expanded = false
+                },
+            )
             EdgeType.entries.forEach { edgeType ->
                 DropdownMenuItem(
                     text = { Text(edgeType.displayName) },
