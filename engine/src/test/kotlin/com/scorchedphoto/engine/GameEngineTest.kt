@@ -37,24 +37,35 @@ class GameEngineTest {
         val b = testTank(id = 2, ownerId = 2, x = 700f)
         val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
 
-        assertEquals(1, engine.currentTank?.id)
-        a.angleDeg = 80f
-        a.power = 20f
+        // Turn order is randomized per match, so this test only asserts that resolving a
+        // turn advances to the *other* tank - not which one goes first.
+        val first = engine.currentTank!!
+        val second = if (first.id == a.id) b else a
+        first.angleDeg = 80f
+        first.power = 20f
         assertTrue(engine.fire())
         assertEquals(MatchPhase.FIRING, engine.phase)
 
         runUntilNotResolving(engine)
 
         assertEquals(MatchPhase.AIMING, engine.phase)
-        assertEquals(2, engine.currentTank?.id)
+        assertEquals(second.id, engine.currentTank?.id)
     }
 
     @Test
     fun `direct hit deals splash damage and carves a crater`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f)
-        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 500f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first plays the shooter
+        // role (x=300); the other plays the target (x=500), regardless of which underlying
+        // Tank object that is. Repositioning after construction is safe on this flat terrain
+        // since every column shares the same height.
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        shooter.x = 300f
+        target.x = 500f
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
         shooter.angleDeg = 45f
@@ -146,9 +157,15 @@ class GameEngineTest {
     @Test
     fun `limited ammo weapon runs out after ammoLimit shots`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val a = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
-        val b = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
-        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first gets the limited
+        // weapon this test tracks ("a"), regardless of which underlying Tank object that is.
+        val a = engine.currentTank!!
+        val b = if (a === t1) t2 else t1
+        a.x = 300f
+        b.x = 900f
 
         val ammoLimit = WeaponCatalog.BIG_BERTHA.ammoLimit!!
         a.currentWeapon = WeaponType.BIG_BERTHA
@@ -234,18 +251,24 @@ class GameEngineTest {
     @Test
     fun `an injured tank's shot is capped at its reduced max power, not scaled down from what was requested`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val healthyShooter = testTank(id = 1, ownerId = 1, x = 300f, health = 100)
-        val healthyTarget = testTank(id = 2, ownerId = 2, x = 700f)
-        val halfHealthShooter = testTank(id = 1, ownerId = 1, x = 300f, health = 50)
-        val halfHealthTarget = testTank(id = 2, ownerId = 2, x = 700f)
+        val healthyA = testTank(id = 1, ownerId = 1, x = 300f)
+        val healthyB = testTank(id = 2, ownerId = 2, x = 700f)
+        val halfHealthA = testTank(id = 1, ownerId = 1, x = 300f)
+        val halfHealthB = testTank(id = 2, ownerId = 2, x = 700f)
 
-        val healthyEngine = GameEngine(terrain, listOf(healthyShooter, healthyTarget), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first is given the health
+        // this test cares about (the other tank's own health is irrelevant to this test).
+        val healthyEngine = GameEngine(terrain, listOf(healthyA, healthyB), maxWindMagnitude = 0f, rng = Random(1))
+        val healthyShooter = healthyEngine.currentTank!!
+        healthyShooter.health = 100
         healthyShooter.angleDeg = 45f
         healthyShooter.power = 80f
         healthyEngine.fire()
         val healthySpeed = healthyEngine.projectiles.single().let { hypot(it.vx.toDouble(), it.vy.toDouble()) }
 
-        val injuredEngine = GameEngine(terrain, listOf(halfHealthShooter, halfHealthTarget), maxWindMagnitude = 0f, rng = Random(1))
+        val injuredEngine = GameEngine(terrain, listOf(halfHealthA, halfHealthB), maxWindMagnitude = 0f, rng = Random(1))
+        val halfHealthShooter = injuredEngine.currentTank!!
+        halfHealthShooter.health = 50
         halfHealthShooter.angleDeg = 45f
         halfHealthShooter.power = 80f // requests more than its capped max (62.5)
         injuredEngine.fire()
@@ -269,19 +292,23 @@ class GameEngineTest {
         val shooter = testTank(id = 1, ownerId = 1, x = 500f)
         val bystander = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
         val engine = GameEngine(terrain, listOf(shooter, bystander), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually fires is this test's "shooter",
+        // and the assertion below is expressed relative to its own x, not a fixed value.
+        val firer = engine.currentTank!!
 
         val terrainBefore = terrain.groundY.copyOf()
-        shooter.angleDeg = 135f // up and to the left, no facingRight involved anymore
-        shooter.power = 20f // modest power so the shot lands well inside the terrain, not off the edge
+        firer.angleDeg = 135f // up and to the left, no facingRight involved anymore
+        firer.power = 20f // modest power so the shot lands well inside the terrain, not off the edge
         engine.fire()
         runUntilNotResolving(engine)
 
-        // A crater carved to the left of the shooter's start x is only possible if the
+        // A crater carved to the left of the firer's start x is only possible if the
         // projectile actually traveled left, confirming the full-circle angle (not a
         // legacy facingRight flag) determines direction.
+        val upperBound = (firer.x.toInt() - 20).coerceAtLeast(0)
         assertTrue(
-            "expected a crater to the shooter's left of x=500",
-            (0..480).any { x -> terrain.groundY[x] > terrainBefore[x] },
+            "expected a crater to the firer's left of x=${firer.x}",
+            (0 until upperBound).any { x -> terrain.groundY[x] > terrainBefore[x] },
         )
     }
 
@@ -370,9 +397,16 @@ class GameEngineTest {
     @Test
     fun `a well-aimed shot reliably deals at least full damage to a fully healthy tank`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f, health = Tank.MAX_HEALTH)
-        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 500f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first plays the shooter
+        // role (x=300); the other plays the target (x=500).
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        shooter.x = 300f
+        target.x = 500f
+        target.health = Tank.MAX_HEALTH
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
         shooter.angleDeg = 45f
@@ -398,14 +432,25 @@ class GameEngineTest {
     @Test
     fun `a near hit deals splash damage but does not automatically destroy the tank`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f)
+        val t2 = testTank(id = 2, ownerId = 2, x = 500f)
+        val t3 = testTank(id = 3, ownerId = 3, x = 520f)
+        val engine = GameEngine(terrain, listOf(t1, t2, t3), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first plays the shooter
+        // role (x=300); the other two fill the target (x=500, takes the direct hit)/
+        // bystander (x=520, just past target - splash only) roles in their original order.
+        val shooter = engine.currentTank!!
+        val others = listOf(t1, t2, t3).filter { it !== shooter }
+        val target = others[0]
         // Just past target, not between shooter and target - the incoming shot hits
         // target directly (ending its flight) before the trajectory ever comes near the
         // bystander, so the bystander only takes falloff splash damage from target's
         // impact point, never registering as a direct hit itself.
-        val bystander = testTank(id = 3, ownerId = 3, x = 520f, health = Tank.MAX_HEALTH)
-        val engine = GameEngine(terrain, listOf(shooter, target, bystander), maxWindMagnitude = 0f, rng = Random(1))
+        val bystander = others[1]
+        shooter.x = 300f
+        target.x = 500f
+        bystander.x = 520f
+        bystander.health = Tank.MAX_HEALTH
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
         shooter.angleDeg = 45f
@@ -586,9 +631,16 @@ class GameEngineTest {
         // distance to the wall, so it crosses x=0 just before it would naturally land - still
         // close to ground level (a few px of clearance) rather than deep mid-flight, keeping
         // the detonation point within the bystander's blast reach.
-        val shooter = testTank(id = 1, ownerId = 1, x = 90f)
-        val bystander = testTank(id = 2, ownerId = 2, x = 10f, health = Tank.MAX_HEALTH)
-        val engine = GameEngine(terrain, listOf(shooter, bystander), maxWindMagnitude = 0f, wallType = EdgeType.BLAST_STEEL, rng = Random(1))
+        val t1 = testTank(id = 1, ownerId = 1, x = 90f)
+        val t2 = testTank(id = 2, ownerId = 2, x = 10f)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, wallType = EdgeType.BLAST_STEEL, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first plays the shooter
+        // role (x=90); the other plays the bystander (x=10).
+        val shooter = engine.currentTank!!
+        val bystander = if (shooter === t1) t2 else t1
+        shooter.x = 90f
+        bystander.x = 10f
+        bystander.health = Tank.MAX_HEALTH
         shooter.angleDeg = 135f // up-and-left, toward the wall at x=0
         shooter.power = 30f
 
@@ -730,12 +782,23 @@ class GameEngineTest {
     @Test
     fun `death sequence enters an exploding state before turning to ash`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
-        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 500f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        // Turn order is randomized - whichever tank actually goes first is this test's
+        // "shooter" (kept at full health), and the other one is the "target" that needs to
+        // die from the shot, so its health is only dropped to 1 now that we know which
+        // tank that is (never the one about to fire a shot of its own).
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        target.health = 1
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
-        shooter.angleDeg = 45f
+        // Mirrors CpuAimCalculator's own private towardTargetAngleDeg - idealPower was solved
+        // assuming this same mirrored angle, so it must match here regardless of which tank
+        // (now decided by the randomized turn order, not always the one at the lower x) ends
+        // up as the shooter.
+        shooter.angleDeg = if (target.x >= shooter.x) 45f else 135f
         shooter.power = idealPower
         assertTrue(engine.fire())
 
@@ -753,12 +816,19 @@ class GameEngineTest {
     @Test
     fun `tank becomes ash only after the death explosion's growth phase completes`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
-        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 500f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        target.health = 1
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
-        shooter.angleDeg = 45f
+        // Mirrors CpuAimCalculator's own private towardTargetAngleDeg - idealPower was solved
+        // assuming this same mirrored angle, so it must match here regardless of which tank
+        // (now decided by the randomized turn order, not always the one at the lower x) ends
+        // up as the shooter.
+        shooter.angleDeg = if (target.x >= shooter.x) 45f else 135f
         shooter.power = idealPower
         assertTrue(engine.fire())
 
@@ -784,12 +854,19 @@ class GameEngineTest {
     @Test
     fun `death explosion still fires at the same moment, only isAsh is deferred`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
-        val shooter = testTank(id = 1, ownerId = 1, x = 300f)
-        val target = testTank(id = 2, ownerId = 2, x = 500f, health = 1)
-        val engine = GameEngine(terrain, listOf(shooter, target), maxWindMagnitude = 0f, rng = Random(1))
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 500f)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        target.health = 1
 
         val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
-        shooter.angleDeg = 45f
+        // Mirrors CpuAimCalculator's own private towardTargetAngleDeg - idealPower was solved
+        // assuming this same mirrored angle, so it must match here regardless of which tank
+        // (now decided by the randomized turn order, not always the one at the lower x) ends
+        // up as the shooter.
+        shooter.angleDeg = if (target.x >= shooter.x) 45f else 135f
         shooter.power = idealPower
         assertTrue(engine.fire())
 
@@ -805,9 +882,10 @@ class GameEngineTest {
             "expected the death explosion event to already have fired",
             engine.drainEvents().any { it is GameEvent.TankExploded && it.tankId == target.id },
         )
+        val nearTarget = ((target.x.toInt() - 50).coerceAtLeast(0))..((target.x.toInt() + 50).coerceAtMost(terrain.width - 1))
         assertTrue(
             "expected the death explosion to already have carved terrain near the tank",
-            (450..550).any { x -> terrain.groundY[x] > terrainBefore[x] },
+            nearTarget.any { x -> terrain.groundY[x] > terrainBefore[x] },
         )
     }
 }

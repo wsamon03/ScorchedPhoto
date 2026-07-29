@@ -30,7 +30,15 @@ class GameSurfaceView(
 ) : SurfaceView(context), SurfaceHolder.Callback {
 
     private val originalGroundY = engine.terrain.groundY.copyOf()
-    private val renderer = GameRenderer(context, photo, originalGroundY, deathPhrases, onBurnMessageAssigned)
+    private val renderer = GameRenderer(
+        context = context,
+        photo = photo,
+        originalGroundY = originalGroundY,
+        deathPhrases = deathPhrases,
+        wallType = engine.wallType,
+        ceilingType = engine.ceilingType,
+        onBurnMessageAssigned = onBurnMessageAssigned,
+    )
     private var loopThread: GameLoopThread? = null
 
     init {

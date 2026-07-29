@@ -19,6 +19,7 @@ import com.scorchedphoto.engine.tanks.TankShape
 import com.scorchedphoto.terrain.HeightMap
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 
 /**
@@ -48,6 +49,8 @@ class GameRenderer(
     private val photo: Bitmap?,
     private val originalGroundY: IntArray,
     private val deathPhrases: List<String>,
+    private val wallType: EdgeType = EdgeType.NONE,
+    private val ceilingType: EdgeType = EdgeType.NONE,
     private val onBurnMessageAssigned: (tankId: Int, spokenText: String) -> Unit = { _, _ -> },
 ) {
 
@@ -70,6 +73,7 @@ class GameRenderer(
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
+    private val edgeBorderPaint = Paint().apply { style = Paint.Style.FILL }
     private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true; alpha = FIRE_ALPHA }
     private val ashPilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ashSpeckPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -307,6 +311,48 @@ class GameRenderer(
 
         drawCraterScars(terrainCanvas, terrain, transform)
         drawHorizonLine(terrainCanvas, terrain, transform)
+        drawEdgeBorders(terrainCanvas)
+    }
+
+    /** A fixed-color border along the screen edges the current [wallType] (left/right) and
+     * [ceilingType] (top) actually bounce off of - drawn in screen space (not scaled by
+     * [WorldTransform], unlike everything else in this layer) since it's a HUD-like frame
+     * around the play area, not a feature of the world itself. [EdgeType.NONE] draws no
+     * border for that edge; [EdgeType.WRAP]'s "opposite edge" bounce and [EdgeType.BLAST_STEEL]'s
+     * detonate-on-touch both still get a color/border like every other real bounce type -
+     * "Random" never reaches here at all, already resolved to one concrete [EdgeType] before
+     * a match starts (see [com.scorchedphoto.app.setup.GameSetupViewModel.commitAndStart]).
+     */
+    private fun drawEdgeBorders(canvas: Canvas) {
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+        val thickness = (min(width, height) * EDGE_BORDER_THICKNESS_FRACTION).coerceAtLeast(1f)
+
+        borderColorFor(wallType)?.let { color ->
+            edgeBorderPaint.color = color
+            canvas.drawRect(0f, 0f, thickness, height, edgeBorderPaint)
+            canvas.drawRect(width - thickness, 0f, width, height, edgeBorderPaint)
+        }
+        borderColorFor(ceilingType)?.let { color ->
+            edgeBorderPaint.color = color
+            canvas.drawRect(0f, 0f, width, thickness, edgeBorderPaint)
+        }
+    }
+
+    /** Each real [EdgeType]'s own distinct, noticeably-different-from-the-others border
+     * color - reuses the same colors as their bounce-mark animations (see
+     * [drawPaddedMark]/[drawRubberMark]/[drawSpringMark]/[drawReflectiveMark]/[drawWrapMark])
+     * for visual consistency between the two. [EdgeType.NONE] has no border ([null]).
+     */
+    private fun borderColorFor(edgeType: EdgeType): Int? = when (edgeType) {
+        EdgeType.NONE -> null
+        EdgeType.PADDED -> Color.rgb(0x66, 0xBB, 0x6A) // green
+        EdgeType.RUBBER -> Color.rgb(0xFF, 0xA7, 0x26) // orange
+        EdgeType.SPRING -> Color.rgb(0x29, 0xB6, 0xF6) // cyan
+        EdgeType.REFLECTIVE -> Color.rgb(0xFF, 0xFF, 0xFF) // white
+        EdgeType.WRAP -> Color.rgb(0x7E, 0x57, 0xC2) // violet
+        EdgeType.BLAST_STEEL -> Color.rgb(0x90, 0xA4, 0xAE) // steel blue-grey
     }
 
     /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
@@ -774,6 +820,10 @@ class GameRenderer(
     companion object {
         private const val CRATER_STROKE_WIDTH = 10f
         private const val HORIZON_STROKE_WIDTH = 3f
+        // Screen-space, not world-space (unlike HORIZON_STROKE_WIDTH etc.) - this is a frame
+        // around the play area, not a feature of the world, so it should look the same
+        // thickness regardless of how zoomed-in the terrain itself is.
+        private const val EDGE_BORDER_THICKNESS_FRACTION = 0.02f
         private const val PROJECTILE_RADIUS = 5f
         private const val BARREL_STROKE_WIDTH = 1.25f
 

@@ -41,7 +41,10 @@ class GameEngine(
     val ceilingType: EdgeType = EdgeType.NONE,
     private val rng: Random = Random.Default,
 ) {
-    private val turnManager = TurnManager(tanks)
+    // Shuffled once per match so turn order isn't always the order tanks were configured in -
+    // tanks itself (used everywhere else: rendering, collision, gravity, etc.) stays in its
+    // original, caller-supplied order; only the turn sequence is randomized.
+    private val turnManager = TurnManager(tanks.shuffled(rng))
 
     private val ammoRemaining: MutableMap<Int, MutableMap<WeaponType, Int>> =
         tanks.associateTo(mutableMapOf()) { tank ->
