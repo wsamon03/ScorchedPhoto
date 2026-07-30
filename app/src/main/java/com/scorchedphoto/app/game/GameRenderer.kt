@@ -185,6 +185,12 @@ class GameRenderer(
     // bounds are still updated via .set(...) every frame in drawAshPile.
     private val ashMoundRects = mutableMapOf<Int, List<RectF>>()
 
+    // Each drowning tank's own little cluster of rising bubbles - generated once
+    // (deterministically, from the tank's own id) and cached, mirroring ashSpecks/
+    // lavaSpecksFor's own caching pattern, so the bubble layout doesn't flicker by being
+    // re-randomized every frame - see bubblesFor/drawDrowningBubbles.
+    private val drowningBubbleSets = mutableMapOf<Int, List<Bubble>>()
+
     // Tracks how long the current tank's turn has been active, purely for the
     // start-of-turn color flash below - reset (via wall-clock nanoTime, not engine dt)
     // whenever the id passed in as currentTankId changes, so it's independent of the
@@ -299,7 +305,7 @@ class GameRenderer(
         // aim/turn-flash changes, RESOLVING's impacts/falls/burns/ash), or while the
         // wall-clock turn-flash above is still active.
         if (staticLayerDirty || phase != MatchPhase.FIRING || flashWindowActive) {
-            redrawStaticLayer(terrain, tanks, transform, currentTankId, flashColor)
+            redrawStaticLayer(terrain, tanks, transform, currentTankId, flashColor, waterLevelY)
             staticLayerDirty = false
         }
         canvas.drawBitmap(staticLayerBitmap!!, 0f, 0f, null)
@@ -627,7 +633,14 @@ class GameRenderer(
     /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
      * doc - into [staticLayerCanvas]: the cached terrain layer as a base, then every tank's
      * body/barrel or ash pile on top. */
-    private fun redrawStaticLayer(terrain: HeightMap, tanks: List<Tank>, transform: WorldTransform, currentTankId: Int?, flashColor: Int?) {
+    private fun redrawStaticLayer(
+        terrain: HeightMap,
+        tanks: List<Tank>,
+        transform: WorldTransform,
+        currentTankId: Int?,
+        flashColor: Int?,
+        waterLevelY: Float,
+    ) {
         val staticCanvas = staticLayerCanvas ?: return
         val terrainBitmap = terrainLayerBitmap
         if (terrainBitmap != null) {
@@ -640,8 +653,13 @@ class GameRenderer(
             // Fell through a Hole/Wrap/Void floor - no body, no ash pile, ever again (see
             // GameEngine.killByFallingThroughFloor's doc): the only remaining trace is its
             // death-taunt speech bubble, drawn separately every frame - see
-            // drawFallThroughSpeechBubble.
-            if (tank.fallingThroughFloor) continue
+            // drawFallThroughSpeechBubble. A tank mid-rise is drawn by the dynamic overlay
+            // instead (see drawRisingTank), which owns its flip/float tween every frame.
+            if (tank.fallingThroughFloor || tank.rising) continue
+            if (tank.isDrowned) {
+                drawDrownedTank(staticCanvas, tank, transform, waterLevelY)
+                continue
+            }
             if (tank.isAsh) {
                 drawAshPile(staticCanvas, tank, transform)
                 continue
@@ -686,6 +704,12 @@ class GameRenderer(
         for (tank in tanks) {
             if (tank.fallingThroughFloor) {
                 drawFallThroughSpeechBubble(canvas, tank, transform)
+            } else if (tank.rising) {
+                drawRisingTank(canvas, tank, transform, waterLevelY)
+            } else if (tank.drowningBubbles) {
+                drawDrowningBubbles(canvas, tank, transform)
+            } else if (tank.drowningSpeech) {
+                drawDrowningSpeechBubble(canvas, tank, transform)
             } else if (tank.burning) {
                 drawBurningTank(canvas, tank, transform)
             } else if (tank.id == firingTankId && firingMessage != null) {
@@ -781,6 +805,100 @@ class GameRenderer(
         val cx = transform.screenX(tank.x)
         val cy = transform.screenY(tank.fallThroughAnchorY)
         drawSpeechBubble(canvas, cx, cy, message)
+    }
+
+    // FloorType.WATER's drowning sequence, taken instead of the ordinary burn/explosion/ash
+    // chain whenever a tank dies fully submerged - see Tank.pendingDrown's doc. Little bubbles
+    // (drawDrowningBubbles) rise from the tank's own position first, then its usual death-taunt
+    // speech bubble (drawDrowningSpeechBubble) - the tank's ordinary upright body (still drawn
+    // by redrawStaticLayer's normal drawTank branch through both of these phases, exactly like a
+    // burning tank's body stays visible under its flames) then flips upside-down and floats up
+    // to the water's own surface (drawRisingTank), settling there permanently (drawDrownedTank),
+    // tracking the surface as it keeps rising for the rest of the match.
+
+    /** A cluster of small bubbles rising from [tank]'s own position, looping for the whole
+     * [Tank.drowningBubbles] phase - drawn with the shared [edgeMarkPaint], mirroring
+     * [drawWrapSparkles]'s own reused-paint pattern. */
+    private fun drawDrowningBubbles(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        edgeMarkPaint.shader = null
+        edgeMarkPaint.style = Paint.Style.FILL
+        for (bubble in bubblesFor(tank.id)) {
+            val cycleFraction = (tank.drowningBubblesElapsed * bubble.riseSpeed + bubble.startFraction) % 1f
+            val bx = cx + bubble.nx * halfWidth
+            val by = cy - cycleFraction * halfWidth * BUBBLE_RISE_HEIGHT_MULTIPLIER
+            val alpha = (BUBBLE_MAX_ALPHA * (1f - cycleFraction)).toInt().coerceIn(0, 255)
+            edgeMarkPaint.color = Color.argb(alpha, 200, 230, 255)
+            canvas.drawCircle(bx, by, bubble.radius * transform.scale, edgeMarkPaint)
+        }
+    }
+
+    /** This tank's own cluster of [Bubble]s - generated once (deterministically, from the
+     * tank's own id) and cached so the layout doesn't flicker by being re-randomized every
+     * frame - mirrors [ashSpecksFor]/[lavaSpecksFor]'s own caching pattern. */
+    private fun bubblesFor(tankId: Int): List<Bubble> = drowningBubbleSets.getOrPut(tankId) {
+        val rng = kotlin.random.Random(tankId * 104_729 + 17)
+        (0 until BUBBLE_COUNT).map {
+            Bubble(
+                nx = rng.nextFloat() * 2f - 1f,
+                startFraction = rng.nextFloat(),
+                riseSpeed = 0.6f + rng.nextFloat() * 0.6f,
+                radius = 1.5f + rng.nextFloat() * 2f,
+            )
+        }
+    }
+
+    /** A drowning tank's own death-taunt speech bubble - reuses [burnMessageFor]/
+     * [drawSpeechBubble] exactly like a burning tank's own bubble does, just anchored at the
+     * same height above the tank a burning tank's own bubble uses. */
+    private fun drawDrowningSpeechBubble(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val message = burnMessageFor(tank) ?: return
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.y)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        val tailTipY = cy - halfWidth * 0.2f - halfWidth * FIRE_HEIGHT_MULTIPLIER
+        drawSpeechBubble(canvas, cx, tailTipY, message)
+    }
+
+    /** [Tank.rising]'s flip-upside-down-and-float-to-the-surface tween, interpolating from the
+     * tank's own frozen resting position (see [com.scorchedphoto.engine.GameEngine.applyTankGravity]'s
+     * doc on why gravity stops touching it once this phase starts) up to the live water
+     * surface, over [DROWNING_RISE_DURATION_SECONDS] - kept numerically in sync with the
+     * engine's own copy of that duration by hand, the same existing pattern [GROWTH_SECONDS]
+     * uses to mirror [com.scorchedphoto.engine.GameEngine]'s death-explosion timing. */
+    private fun drawRisingTank(canvas: Canvas, tank: Tank, transform: WorldTransform, waterLevelY: Float) {
+        val progress = (tank.risingElapsed / DROWNING_RISE_DURATION_SECONDS).coerceIn(0f, 1f)
+        val cx = transform.screenX(tank.x)
+        val startCy = transform.screenY(tank.y)
+        val endCy = transform.screenY(waterLevelY)
+        val cy = startCy + (endCy - startCy) * progress
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        val flipDeg = 180f * progress
+
+        tankBodyPaint.color = tank.color
+        canvas.save()
+        canvas.rotate(flipDeg, cx, cy)
+        canvas.drawPath(tankBodyPathFor(tank, cx, cy, halfWidth), tankBodyPaint)
+        canvas.restore()
+        // No barrel drawn - a dead tank isn't aiming, matching every other death-state body draw.
+    }
+
+    /** [Tank.isDrowned]'s permanent resting state - upside-down, exactly at the live water
+     * surface, re-tracking it every redraw as it keeps rising for the rest of the match.
+     * Drawn into the *static* layer (see [redrawStaticLayer]) rather than every frame, same as
+     * [drawAshPile] - it only needs to move when the water level itself changes, which already
+     * invalidates that layer (a round boundary always falls outside [MatchPhase.FIRING]). */
+    private fun drawDrownedTank(canvas: Canvas, tank: Tank, transform: WorldTransform, waterLevelY: Float) {
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(waterLevelY)
+        val halfWidth = TANK_HALF_WIDTH * transform.scale
+        tankBodyPaint.color = tank.color
+        canvas.save()
+        canvas.rotate(180f, cx, cy)
+        canvas.drawPath(tankBodyPathFor(tank, cx, cy, halfWidth), tankBodyPaint)
+        canvas.restore()
     }
 
     /**
@@ -1148,6 +1266,13 @@ class GameRenderer(
      * in `[0, 1]`) - see [drawLavaFill]. */
     private data class LavaSpeck(val alongFraction: Float, val depthFraction: Float, val radius: Float)
 
+    /** One bubble's layout within a drowning tank's own rising bubble cluster - [nx] its
+     * horizontal offset (normalized to the tank's own half-width), [startFraction] its phase
+     * offset within the endless 0..1 rise-and-fade cycle (so the whole cluster doesn't rise in
+     * lockstep), [riseSpeed] how many full cycles per second, [radius] in world-space units -
+     * see [drawDrowningBubbles]/[bubblesFor]. */
+    private data class Bubble(val nx: Float, val startFraction: Float, val riseSpeed: Float, val radius: Float)
+
     private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
         speechBubbleTextPaint.getFontMetrics(speechBubbleFontMetrics)
         val fm = speechBubbleFontMetrics
@@ -1294,5 +1419,15 @@ class GameRenderer(
         private const val BUBBLE_CORNER_RADIUS = 10f
         private const val BUBBLE_TAIL_WIDTH = 14f
         private const val BUBBLE_TAIL_HEIGHT = 10f
+
+        // FloorType.WATER's drowning sequence - see drawDrowningBubbles/drawRisingTank.
+        private const val BUBBLE_COUNT = 5
+        private const val BUBBLE_RISE_HEIGHT_MULTIPLIER = 3f
+        private const val BUBBLE_MAX_ALPHA = 200
+        // Mirrors GameEngine's own DROWNING_RISE_DURATION_SECONDS constant (kept separate
+        // since this is a rendering concern, not engine state, the same existing pattern
+        // GROWTH_SECONDS uses for DEATH_EXPLOSION_GROWTH_SECONDS) - keep numerically in sync
+        // by hand if the engine's copy ever changes.
+        private const val DROWNING_RISE_DURATION_SECONDS = 1.5f
     }
 }

@@ -46,6 +46,7 @@ class GameSoundController @Inject constructor(
     private val explosionSoundId = soundPool.load(context, R.raw.sfx_explosion, 1)
     private val tankExplosionSoundId = soundPool.load(context, R.raw.sfx_tank_explosion, 1)
     private val fireLoopSoundId = soundPool.load(context, R.raw.sfx_fire_loop, 1)
+    private val bubbleLoopSoundId = soundPool.load(context, R.raw.sfx_bubble_loop, 1)
 
     private val whistle = WhistleOscillator()
     private var whistleStarted = false
@@ -55,6 +56,12 @@ class GameSoundController @Inject constructor(
     // ConcurrentHashMap rather than a plain map: written from the game-loop thread
     // (updateBurningTanks) but also iterated from the settings-collector coroutine below.
     private val burningStreams = ConcurrentHashMap<Int, Int>()
+
+    // Mirrors burningStreams above, but for FloorType.WATER's drowning bubble loop (see
+    // updateDrowningTanks) - a separate map since a tank is never simultaneously burning and
+    // drowning (killOrDrown routes to exactly one sequence), but kept independent regardless
+    // so the two loops' own start/stop bookkeeping never has to know about each other.
+    private val drowningStreams = ConcurrentHashMap<Int, Int>()
 
     // Read on the game-loop thread (every play()/updateWhistle() call), written from the
     // settings collector below - plain @Volatile rather than a suspend read, since this
@@ -72,10 +79,13 @@ class GameSoundController @Inject constructor(
             audioSettingsRepository.settings.collect { settings ->
                 sfxVolume = settings.sfxVolume
                 whistle.volumeMultiplier = settings.sfxVolume
-                // Already-looping fire-crackle streams don't otherwise notice a volume
+                // Already-looping fire-crackle/bubble streams don't otherwise notice a volume
                 // change until they'd next restart, so nudge any currently playing ones.
                 for (streamId in burningStreams.values) {
                     soundPool.setVolume(streamId, FIRE_LOOP_VOLUME * sfxVolume, FIRE_LOOP_VOLUME * sfxVolume)
+                }
+                for (streamId in drowningStreams.values) {
+                    soundPool.setVolume(streamId, BUBBLE_LOOP_VOLUME * sfxVolume, BUBBLE_LOOP_VOLUME * sfxVolume)
                 }
             }
         }
@@ -127,6 +137,26 @@ class GameSoundController @Inject constructor(
         }
     }
 
+    /** Called every frame with the ids of tanks currently mid-[com.scorchedphoto.engine.tanks.Tank.drowningBubbles]
+     * - starts each newly-bubbling tank's looping bubble stream and stops it the instant that
+     * tank's bubble phase ends (the speech-bubble/flip-and-rise phases that follow are silent -
+     * see [com.scorchedphoto.app.game.GameLoopThread]'s own doc on why only this phase drives
+     * sound). Mirrors [updateBurningTanks] exactly, just for the drowning sequence instead. */
+    fun updateDrowningTanks(drowningTankIds: Set<Int>) {
+        if (drowningTankIds.isEmpty() && drowningStreams.isEmpty()) return
+        val toStop = drowningStreams.keys - drowningTankIds
+        for (tankId in toStop) {
+            drowningStreams.remove(tankId)?.let { soundPool.stop(it) }
+        }
+        val toStart = drowningTankIds - drowningStreams.keys
+        for (tankId in toStart) {
+            if (bubbleLoopSoundId !in loadedSoundIds) continue
+            val volume = BUBBLE_LOOP_VOLUME * sfxVolume
+            val streamId = soundPool.play(bubbleLoopSoundId, volume, volume, 1, -1, 1f)
+            if (streamId != 0) drowningStreams[tankId] = streamId
+        }
+    }
+
     private fun play(soundId: Int, volume: Float) {
         if (soundId !in loadedSoundIds) return
         val scaled = volume * sfxVolume
@@ -136,5 +166,6 @@ class GameSoundController @Inject constructor(
     companion object {
         private const val MAX_STREAMS = 8
         private const val FIRE_LOOP_VOLUME = 0.55f
+        private const val BUBBLE_LOOP_VOLUME = 0.5f
     }
 }

@@ -115,6 +115,13 @@ class GameEngine(
     private var turnsCompletedThisRound = 0
     private var tanksAliveAtRoundStart = tanks.count { it.alive }
 
+    // Set when processFloorRound() (see finishResolution) has just started a brand-new death
+    // animation (a round-boundary Water/Lava kill) that tick()'s own pre-call gate had no way to
+    // know about yet - true for however many finishResolution() re-entries it takes for that
+    // animation to actually finish, guarding against re-running processFloorRound() a second time
+    // for the same round boundary. See finishResolution's own doc.
+    private var awaitingRoundAnimations: Boolean = false
+
     val currentTank: Tank? get() = turnManager.currentTank
     val projectiles: List<Projectile> get() = activeProjectiles
 
@@ -176,29 +183,39 @@ class GameEngine(
         updateAwaitingExplosion(dt)
         updateExploding(dt)
         updateFallingThroughFloor(dt)
+        updateDrowningBubbles(dt)
+        updateDrowningSpeech(dt)
+        updateRisingTanks(dt)
         startPendingBurns()
+        startPendingDrowns()
 
         // Explosions (from projectiles still flying or still-animating impact flashes)
         // must fully finish before any death animation begins - see startPendingBurns -
         // and death animations (burning, its pause, then its own closing explosion) must
         // fully finish before the turn can advance or a win can be declared.
         val explosionsDone = activeProjectiles.isEmpty() && activeImpactEffects.isEmpty()
-        // `it.exploding` is included for clarity/defense-in-depth even though it's currently
-        // redundant against explosionsDone's activeImpactEffects.isEmpty() gate:
-        // DEATH_EXPLOSION_GROWTH_SECONDS is strictly less than the impact effect's own
-        // IMPACT_EFFECT_LIFETIME_SECONDS, so activeImpactEffects is guaranteed still
-        // non-empty for as long as any tank.exploding is true. it.fallingThroughFloor has no
-        // such effect-based backstop (a fall-through death plays no explosion at all - see
-        // killByFallingThroughFloor) so it's checked directly, for the same reason: don't let
-        // the round resolve out from under a still-playing death-taunt speech bubble.
-        val deathAnimationsDone = tanks.none {
-            it.burning || it.pendingBurn || it.awaitingExplosion || it.exploding || it.fallingThroughFloor
-        }
-        if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone) {
+        if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone()) {
             finishResolution()
         } else {
             phase = MatchPhase.RESOLVING
         }
+    }
+
+    /** True once every tank's own death animation (burn/explosion/ash, fall-through, or drown)
+     * has fully finished - see [tick]/[finishResolution], both of which must wait for this
+     * before letting a round/turn actually be considered complete. `it.exploding` is included
+     * for clarity/defense-in-depth even though it's currently redundant against `tick()`'s own
+     * `explosionsDone` gate: [DEATH_EXPLOSION_GROWTH_SECONDS] is strictly less than the impact
+     * effect's own [IMPACT_EFFECT_LIFETIME_SECONDS], so `activeImpactEffects` is guaranteed
+     * still non-empty for as long as any `tank.exploding` is true. `fallingThroughFloor`/the
+     * drowning-chain flags have no such effect-based backstop (neither death plays a real
+     * explosion) so they're checked directly, for the same reason: don't let the round resolve
+     * out from under a still-playing death-taunt speech bubble or flip/float animation.
+     * `isAsh`/`isDrowned` are deliberately excluded - both are permanent terminal states that
+     * must never keep gating future rounds. */
+    private fun deathAnimationsDone(): Boolean = tanks.none {
+        it.burning || it.pendingBurn || it.awaitingExplosion || it.exploding || it.fallingThroughFloor ||
+            it.pendingDrown || it.drowningBubbles || it.drowningSpeech || it.rising
     }
 
     // Filters activeProjectiles in place via its own iterator instead of rebuilding fresh
@@ -258,9 +275,18 @@ class GameEngine(
                 }
                 groundedThisTick -> {
                     val hit = findTerrainCrossing(prevX, prevY, p.x, p.y) ?: TerrainHit(p.x, terrainY.toFloat())
-                    resolveImpact(p.weapon, hit.x, hit.y)
-                    pendingEvents += GameEvent.Impact
-                    iterator.remove()
+                    if (floorType == FloorType.WATER && hit.y >= currentWaterLevelY) {
+                        // A shell landing directly in open water with no tank there is
+                        // absorbed silently - no explosion, no crater, no damage - mirroring
+                        // the Hole/Void fizzle in handleFloorEdge, but triggered by submersion
+                        // rather than reaching the map's true bottom. A direct hit on a tank
+                        // (touchedTank, above) always still detonates regardless of water.
+                        iterator.remove()
+                    } else {
+                        resolveImpact(p.weapon, hit.x, hit.y)
+                        pendingEvents += GameEvent.Impact
+                        iterator.remove()
+                    }
                 }
                 wallType != EdgeType.NONE && (p.x <= 0f || p.x >= terrain.width) ->
                     handleEdgeBounce(iterator, p, wallType, isWall = true)
@@ -448,13 +474,13 @@ class GameEngine(
                 damage == null -> {
                     if (weapon.maxDamage > 0) {
                         tank.health = 0
-                        kill(tank)
+                        killOrDrown(tank)
                     }
                 }
                 damage > 0 -> {
                     tank.health = (tank.health - damage).coerceAtLeast(0)
                     if (tank.health == 0) {
-                        kill(tank)
+                        killOrDrown(tank)
                     }
                 }
             }
@@ -468,6 +494,32 @@ class GameEngine(
         tank.alive = false
         tank.pendingBurn = true
         killedThisResolution += tank.id
+    }
+
+    /** Marks [tank] dead and queues its drowning animation - little bubbles, then a
+     * death-taunt speech bubble, then flipping upside-down and floating up to (and
+     * permanently at) the water's own rising surface - see [Tank.pendingDrown] and its onward
+     * chain. Deliberately bypasses [kill]'s ordinary burn/explosion/ash sequence entirely:
+     * drowning is peaceful, not violent - no fire, no death-explosion crater, no splash damage
+     * to nearby tanks. */
+    private fun killByDrowning(tank: Tank) {
+        tank.alive = false
+        killedThisResolution += tank.id
+        tank.pendingDrown = true
+    }
+
+    /** Chooses between the ordinary burn/explosion/ash death ([kill]) and the drowning
+     * sequence ([killByDrowning]) based on [tank]'s own submersion right now - a tank whose
+     * entire body is underwater never burns, however it was killed (a direct hit, splash
+     * damage, or a fall into deep water); a tank that's only partially submerged (or on any
+     * non-Water floor) still gets the ordinary sequence. Mirrors [applyDrowningCheck]'s own
+     * submersion test exactly. */
+    private fun killOrDrown(tank: Tank) {
+        if (floorType == FloorType.WATER && tank.y - Tank.RADIUS >= currentWaterLevelY) {
+            killByDrowning(tank)
+        } else {
+            kill(tank)
+        }
     }
 
     /** How deep an ordinary weapon/death-explosion impact (see [resolveImpact]) is allowed to
@@ -540,14 +592,12 @@ class GameEngine(
     }
 
     /** Any alive tank fully submerged - even its topmost point at or below the water's own
-     * surface - dies at the round boundary via the ordinary [kill] path (full burn/explosion/
-     * ash sequence; water drowning is not one of the instant, animation-skipping fall-through
-     * deaths [killByFallingThroughFloor] handles for Hole/Wrap/Void). */
+     * surface - drowns at the round boundary (see [killByDrowning]). */
     private fun applyDrowningCheck() {
         for (tank in tanks) {
             if (!tank.alive) continue
             if (tank.y - Tank.RADIUS >= currentWaterLevelY) {
-                kill(tank)
+                killByDrowning(tank)
             }
         }
     }
@@ -581,7 +631,7 @@ class GameEngine(
 
     private fun applyLavaDamage(tank: Tank, fraction: Float) {
         tank.health = (tank.health - DamageCalculator.percentOfMaxHealth(fraction)).coerceAtLeast(0)
-        if (tank.health == 0) kill(tank)
+        if (tank.health == 0) killOrDrown(tank)
     }
 
     /** [FloorType.HOLE]/[FloorType.WRAP]/[FloorType.VOID] only: a tank that settles onto a
@@ -615,6 +665,59 @@ class GameEngine(
         }
     }
 
+    /** Mirrors [startPendingBurns] exactly, but for [Tank.pendingDrown] - waits for no active
+     * projectiles/impact effects and a tank that's actually landed before starting the bubble
+     * phase, so a drowning death's own animation never overlaps a still-playing blast/fall. */
+    private fun startPendingDrowns() {
+        if (activeProjectiles.isNotEmpty() || activeImpactEffects.isNotEmpty()) return
+        for (tank in tanks) {
+            if (!tank.pendingDrown || tank.falling) continue
+            tank.pendingDrown = false
+            tank.drowningBubbles = true
+            tank.drowningBubblesElapsed = 0f
+        }
+    }
+
+    private fun updateDrowningBubbles(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.drowningBubbles) continue
+            tank.drowningBubblesElapsed += dt
+            if (tank.drowningBubblesElapsed >= DROWNING_BUBBLES_DURATION_SECONDS) {
+                tank.drowningBubbles = false
+                tank.drowningSpeech = true
+                tank.drowningSpeechElapsed = 0f
+            }
+        }
+    }
+
+    private fun updateDrowningSpeech(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.drowningSpeech) continue
+            tank.drowningSpeechElapsed += dt
+            if (tank.drowningSpeechElapsed >= DROWNING_SPEECH_DURATION_SECONDS) {
+                tank.drowningSpeech = false
+                tank.rising = true
+                tank.risingElapsed = 0f
+            }
+        }
+    }
+
+    /** The final drowning phase - flips upside-down and floats from wherever gravity last left
+     * it (see [applyTankGravity]'s own skip for [Tank.rising]) up to the live water surface,
+     * over [DROWNING_RISE_DURATION_SECONDS] - see [com.scorchedphoto.app.game.GameRenderer]'s
+     * `drawRisingTank` for the actual tween. [Tank.isDrowned] afterward is permanent - the
+     * drowning equivalent of [Tank.isAsh] - and, like it, excluded from [deathAnimationsDone]. */
+    private fun updateRisingTanks(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.rising) continue
+            tank.risingElapsed += dt
+            if (tank.risingElapsed >= DROWNING_RISE_DURATION_SECONDS) {
+                tank.rising = false
+                tank.isDrowned = true
+            }
+        }
+    }
+
     private fun splitMirv(parent: Projectile): List<Projectile> {
         val weapon = parent.weapon
         val childWeapon = weapon.copy(childCount = 1, childSpreadDegrees = 0f)
@@ -639,19 +742,25 @@ class GameEngine(
 
     private fun applyTankGravity(dt: Float) {
         for (tank in tanks) {
-            // Already fallen through and gone (see killByFallingThroughFloor) - no longer
-            // participates in gravity/settling at all, only its death-taunt bubble timer
-            // (updateFallingThroughFloor) still runs.
-            if (tank.fallingThroughFloor) continue
-            // A tank that just died keeps falling until it actually lands - skipping
-            // gravity for it the instant it dies (like every other dead tank) would leave
-            // it frozen hovering wherever the killing blow found it, even when the blast
-            // that killed it also blew away the ground underneath - see startPendingBurns,
-            // which waits for tank.falling to clear before starting the death animation.
-            // An ash pile (see Tank.isAsh) keeps settling the same way for as long as the
-            // match goes on, so a later blast digging out the ground underneath it makes
-            // it fall too, instead of hanging in mid-air over its own crater.
-            if (!tank.alive && !tank.pendingBurn && !tank.isAsh) continue
+            // Fell through and gone (see killByFallingThroughFloor), or already mid-rise/
+            // permanently floating (see updateRisingTanks) - none of these ever participate in
+            // gravity again; a rising/drowned tank's vertical position is driven entirely by
+            // its own risingElapsed tween (GameRenderer) or the live water level, never tank.y.
+            if (tank.fallingThroughFloor || tank.rising || tank.isDrowned) continue
+            // A tank that just died (an ordinary kill - pendingBurn - or a drowning death -
+            // pendingDrown) keeps falling until it actually lands - skipping gravity for it the
+            // instant it dies (like every other dead tank) would leave it frozen hovering
+            // wherever the killing blow found it, even when the blast that killed it also blew
+            // away the ground underneath - see startPendingBurns/startPendingDrowns, which wait
+            // for tank.falling to clear before starting the death animation. Once the animation
+            // itself starts (burning/awaitingExplosion/exploding, or drowningBubbles/
+            // drowningSpeech), gravity stops touching it again until isAsh (ordinary deaths
+            // only - a drowned tank never becomes ash, it goes drowningSpeech -> rising ->
+            // isDrowned instead, so there is no "resume forever" phase for it). isAsh itself
+            // keeps settling the same way for as long as the match goes on, so a later blast
+            // digging out the ground underneath it makes it fall too, instead of hanging in
+            // mid-air over its own crater.
+            if (!tank.alive && !tank.pendingBurn && !tank.pendingDrown && !tank.isAsh) continue
             val surfaceY = terrain.heightAt(tank.x.toInt()).toFloat()
             if (tank.y < surfaceY - FALL_SETTLE_EPSILON) {
                 tank.falling = true
@@ -692,7 +801,7 @@ class GameEngine(
         if (damage > 0) {
             tank.health = (tank.health - damage).coerceAtLeast(0)
             if (tank.health == 0) {
-                kill(tank)
+                killOrDrown(tank)
             }
         }
     }
@@ -776,16 +885,31 @@ class GameEngine(
         activeBounceEffects.removeAll { it.age > BOUNCE_EFFECT_LIFETIME_SECONDS }
     }
 
+    /** A round (see [processFloorRound]) is checked for and processed *before* the win check,
+     * not after - so a Water/Lava round that eliminates the last standing side can end the
+     * match on this same turn, instead of leaving it stalled one turn behind. Guarded by
+     * [awaitingRoundAnimations] so that increment/`processFloorRound()` only ever actually runs
+     * once per round boundary, even though this function can now be re-entered several times in
+     * a row while a round-boundary kill's own death animation (Water's drowning, Lava's damage)
+     * plays out - `processFloorRound()` can itself just have started a brand-new one on a tank
+     * `tick()`'s own pre-call [deathAnimationsDone] check had no way to know about yet, so the
+     * turn can't advance/a win can't be declared until that finishes too. */
     private fun finishResolution() {
-        // A round (see processFloorRound) is checked for and processed *before* the win check,
-        // not after - so a Water/Lava round that eliminates the last standing side can end the
-        // match on this same turn, instead of leaving it stalled one turn behind.
-        turnsCompletedThisRound++
-        if (turnsCompletedThisRound >= tanksAliveAtRoundStart) {
-            processFloorRound()
-            turnsCompletedThisRound = 0
-            tanksAliveAtRoundStart = tanks.count { it.alive }
+        if (!awaitingRoundAnimations) {
+            turnsCompletedThisRound++
+            if (turnsCompletedThisRound >= tanksAliveAtRoundStart) {
+                processFloorRound()
+                turnsCompletedThisRound = 0
+                tanksAliveAtRoundStart = tanks.count { it.alive }
+            }
         }
+
+        if (!deathAnimationsDone()) {
+            awaitingRoundAnimations = true
+            phase = MatchPhase.RESOLVING
+            return
+        }
+        awaitingRoundAnimations = false
 
         val result = turnManager.checkWinCondition() ?: mutualEliminationTie()
         if (result != null) {
@@ -848,6 +972,17 @@ class GameEngine(
         // Water's per-round rise (see raiseWaterLevel) - 2% of terrain.height per round, per
         // the vertical-percentages-use-height decision.
         private const val WATER_RISE_FRACTION = 0.02f
+
+        // The drowning sequence's own 3 phases (see killByDrowning's onward chain) - bubbles,
+        // then a speech bubble, then the flip-and-float-to-the-surface animation.
+        // DROWNING_SPEECH_DURATION_SECONDS reuses TANK_BURNING_DURATION_SECONDS's value for a
+        // consistent taunt-display length, same rationale as FALL_THROUGH_BUBBLE_SECONDS's own
+        // reuse of it. GameRenderer keeps its own copy of DROWNING_RISE_DURATION_SECONDS (a
+        // rendering-only concern - the actual rise tween), which must be kept numerically in
+        // sync with this one by hand.
+        private const val DROWNING_BUBBLES_DURATION_SECONDS = 1.5f
+        private const val DROWNING_SPEECH_DURATION_SECONDS = TANK_BURNING_DURATION_SECONDS
+        private const val DROWNING_RISE_DURATION_SECONDS = 1.5f
 
         // Lava's own regrowth never carves deeper than this fraction of terrain.height below
         // wherever its region was first seeded (see maybeSeedFloorRegion) - ordinary gunfire on

@@ -161,12 +161,13 @@ class GameLoopThread(
             }
         }
 
-        // Leaving the screen mid-flight/mid-burn (e.g. a win ending the match) must not
-        // leave the whistle or a fire loop playing forever - both are driven purely by
-        // continuous per-frame state, so with no more frames coming they'd otherwise never
-        // hear the "stop" signal on their own.
+        // Leaving the screen mid-flight/mid-burn/mid-drown (e.g. a win ending the match) must
+        // not leave the whistle, a fire loop, or a bubble loop playing forever - all three are
+        // driven purely by continuous per-frame state, so with no more frames coming they'd
+        // otherwise never hear the "stop" signal on their own.
         soundController.updateWhistle(null)
         soundController.updateBurningTanks(emptySet())
+        soundController.updateDrowningTanks(emptySet())
     }
 
     /** Forwards this frame's engine events to one-shot sounds, and drives the two
@@ -195,6 +196,15 @@ class GameLoopThread(
             emptySet()
         }
         soundController.updateBurningTanks(burningTankIds)
+        // Only Tank.drowningBubbles drives the loop - it stops the instant the death-taunt
+        // speech phase begins, matching the user's own "bubbles + sound... then the message
+        // box and speech" sequencing (see GameEngine.killByDrowning's doc).
+        val drowningTankIds = if (engine.tanks.any { it.drowningBubbles }) {
+            engine.tanks.filter { it.drowningBubbles }.mapTo(mutableSetOf()) { it.id }
+        } else {
+            emptySet()
+        }
+        soundController.updateDrowningTanks(drowningTankIds)
     }
 
     /** Kicks off a shot: picks a random pre-fire taunt for [tankId] from [attackPhrases],

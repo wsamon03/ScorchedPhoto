@@ -1,9 +1,11 @@
 package com.scorchedphoto.engine
 
+import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
 import com.scorchedphoto.engine.physics.POWER_SCALE
+import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.testTank
 import com.scorchedphoto.terrain.HeightMap
 import org.junit.Assert.assertEquals
@@ -347,6 +349,399 @@ class GameEngineFloorTypeTest {
         assertTrue("expected at least one tank to have drowned", !a.alive || !b.alive)
     }
 
+    // --- Water: drowning sequence (replaces burn/explode/ash for a fully submerged death) ----
+
+    /** Shared shape for most drowning tests below: three tanks - two sharing an owner so
+     * drowning the "victim" never ends the match on its own - on a mostly-shallow map, with a
+     * *wide* dug-down region (not just the victim's own single column) near the map's true
+     * bottom, and the victim parked in the middle of it. Water starts basically at zero depth
+     * ([GameEngine]'s own `currentWaterLevelY` inits to `terrain.height`, so full submersion is
+     * mathematically impossible before at least one round has actually lowered it) and drops by
+     * exactly 2% of terrain.height per completed round, so a single completed round (980) is
+     * already enough to submerge the victim's own topmost point (999 - 7 = 992). The region is
+     * widened well past any ordinary [fireSafeFillerShot]'s own ~95px range specifically so that
+     * if turn order ever has the victim itself fire while already resting down here, its shot
+     * still lands safely within this same deep region instead of finding the sharply shallower
+     * terrain immediately outside it and grounding right back on top of its own body (a real
+     * self-splash-kill risk a narrower single-column well was found to actually trigger).
+     */
+    private fun waterDrowningTrio(): Triple<GameEngine, Tank, HeightMap> {
+        val terrain = flatTerrain(width = 3000, height = 1000, groundY = 100)
+        for (x in 200 until 800) terrain.groundY[x] = 999
+        val victim = testTank(id = 1, ownerId = 1, x = 500f, health = 1000)
+        val victimOwnerMate = testTank(id = 2, ownerId = 1, x = 1000f, health = 1000)
+        val other = testTank(id = 3, ownerId = 2, x = 2500f, health = 1000)
+        val engine = GameEngine(
+            terrain,
+            listOf(victim, victimOwnerMate, other),
+            maxWindMagnitude = 0f,
+            floorType = FloorType.WATER,
+            rng = Random(1),
+        )
+        return Triple(engine, victim, terrain)
+    }
+
+    @Test
+    fun `a fully submerged tank at a round boundary drowns via killByDrowning, never touching the ordinary burn path`() {
+        val (engine, victim, _) = waterDrowningTrio()
+
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+
+        // The 3rd (round-completing) shot is where victim actually drowns - fire and tick it
+        // manually instead of using fireSafeFillerShot/runUntilNotResolving, so every tick of
+        // the whole animation can be inspected instead of only the settled end state.
+        val firer = engine.currentTank!!
+        firer.angleDeg = if (firer.x < engine.terrain.width / 2f) 135f else 45f
+        firer.power = 30f
+        engine.fire()
+
+        var ticks = 0
+        while (!victim.isDrowned && ticks < 20_000) {
+            engine.tick(1f / 60f)
+            assertFalse("expected no burn animation from drowning", victim.burning)
+            assertFalse("expected no pendingBurn from drowning", victim.pendingBurn)
+            assertFalse("expected no awaitingExplosion from drowning", victim.awaitingExplosion)
+            assertFalse("expected no exploding from drowning", victim.exploding)
+            assertFalse("expected drowning to never reach isAsh", victim.isAsh)
+            ticks++
+        }
+
+        assertTrue("expected the drowning animation to actually finish", ticks < 20_000)
+        assertFalse(victim.alive)
+        assertTrue(victim.isDrowned)
+    }
+
+    @Test
+    fun `the drowning phase sequence advances pendingDrown to drowningBubbles to drowningSpeech to rising to isDrowned, freezing y throughout`() {
+        val (engine, victim, _) = waterDrowningTrio()
+
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+
+        val firer = engine.currentTank!!
+        firer.angleDeg = if (firer.x < engine.terrain.width / 2f) 135f else 45f
+        firer.power = 30f
+        engine.fire()
+
+        var sawPendingDrown = false
+        var sawDrowningBubbles = false
+        var sawDrowningSpeech = false
+        var sawRising = false
+        var frozenY: Float? = null
+        var ticks = 0
+        while (!victim.isDrowned && ticks < 20_000) {
+            engine.tick(1f / 60f)
+            if (victim.pendingDrown) sawPendingDrown = true
+            if (victim.drowningBubbles || victim.drowningSpeech || victim.rising) {
+                if (frozenY == null) frozenY = victim.y
+                assertEquals(
+                    "expected y frozen from the start of drowningBubbles through the end of rising",
+                    frozenY,
+                    victim.y,
+                    0.001f,
+                )
+            }
+            if (victim.drowningBubbles) sawDrowningBubbles = true
+            if (victim.drowningSpeech) sawDrowningSpeech = true
+            if (victim.rising) sawRising = true
+            ticks++
+        }
+
+        assertTrue("expected the drowning animation to actually finish", ticks < 20_000)
+        assertTrue("expected the pendingDrown phase to have occurred", sawPendingDrown)
+        assertTrue("expected the drowningBubbles phase to have occurred", sawDrowningBubbles)
+        assertTrue("expected the drowningSpeech phase to have occurred", sawDrowningSpeech)
+        assertTrue("expected the rising phase to have occurred", sawRising)
+        assertTrue(victim.isDrowned)
+    }
+
+    @Test
+    fun `deathAnimationsDone gates round completion until isDrowned - the Water round-kill freeze regression`() {
+        val (engine, victim, _) = waterDrowningTrio()
+
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+
+        val firer = engine.currentTank!!
+        firer.angleDeg = if (firer.x < engine.terrain.width / 2f) 135f else 45f
+        firer.power = 30f
+        engine.fire()
+
+        var sawResolvingWhileDrowning = false
+        var ticks = 0
+        while (!victim.isDrowned && ticks < 20_000) {
+            engine.tick(1f / 60f)
+            if (victim.pendingDrown || victim.drowningBubbles || victim.drowningSpeech || victim.rising) {
+                assertEquals(
+                    "expected the phase to stay RESOLVING while the drowning animation plays out " +
+                        "- the finishResolution freeze regression",
+                    MatchPhase.RESOLVING,
+                    engine.phase,
+                )
+                sawResolvingWhileDrowning = true
+            }
+            ticks++
+        }
+
+        assertTrue("expected the drowning animation to actually finish", ticks < 20_000)
+        assertTrue("expected to have actually observed RESOLVING mid-animation", sawResolvingWhileDrowning)
+        assertTrue(victim.isDrowned)
+        assertEquals(
+            "expected the round to actually resolve to AIMING once the animation finished",
+            MatchPhase.AIMING,
+            engine.phase,
+        )
+    }
+
+    @Test
+    fun `once isDrowned, the tank no longer blocks further round resolution`() {
+        val (engine, victim, terrain) = waterDrowningTrio()
+
+        // Drown victim across round 1 (3 turns: 2 fillers + the round-completing 3rd) - run to
+        // completion via runUntilNotResolving/fireSafeFillerShot since this test only cares
+        // about the settled state, not the animation's own tick-by-tick progression.
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+
+        assertTrue("expected victim to have finished drowning by now", victim.isDrowned)
+        val levelAfterRound1 = engine.waterLevelY
+
+        // Two more full rounds, now with only the 2 remaining alive tanks (1 turn each).
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        assertEquals(levelAfterRound1 - 0.02f * terrain.height, engine.waterLevelY, 0.001f)
+
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        assertEquals(levelAfterRound1 - 2 * 0.02f * terrain.height, engine.waterLevelY, 0.001f)
+    }
+
+    @Test
+    fun `both tanks drowning in the same round still declares a tie`() {
+        val terrain = flatTerrain(width = 3000, height = 1000, groundY = 100)
+        val a = testTank(id = 1, ownerId = 1, x = 500f, health = 1000)
+        val b = testTank(id = 2, ownerId = 2, x = 2500f, health = 1000)
+        // Each dug down over a *wide* region, not just its own single column - see
+        // waterDrowningTrio's own doc for why a narrow well is actually unsafe here: if either
+        // tank's turn has it fire while it's already resting down there, a normal
+        // fireSafeFillerShot's own ~95px shot needs to land safely within this same deep region
+        // instead of finding sharply shallower terrain immediately outside it and grounding
+        // right back on top of its own body.
+        for (x in 300 until 700) terrain.groundY[x] = 999
+        for (x in 2300 until 2700) terrain.groundY[x] = 999
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, floorType = FloorType.WATER, rng = Random(1))
+
+        fireSafeFillerShot(engine) // 1 of 2 turns
+        // 2 of 2 - the round completes here, both drown; this call's own runUntilNotResolving
+        // loops until phase leaves FIRING/RESOLVING, i.e. until both full drowning animations
+        // finish and the match is scored.
+        fireSafeFillerShot(engine)
+
+        assertEquals(MatchPhase.GAME_OVER, engine.phase)
+        assertFalse(a.alive)
+        assertFalse(b.alive)
+        assertTrue(a.isDrowned)
+        assertTrue(b.isDrowned)
+        val result = engine.winResult
+        assertNotNull("expected a tie result instead of a stalled match with no winner", result)
+        assertEquals(setOf(1, 2), result?.winningOwnerIds?.toSet())
+        assertEquals(setOf(1, 2), result?.winningTankIds?.toSet())
+    }
+
+    @Test
+    fun `a dry tank under Water floor killed by a direct hit still burns, explodes, and ashes normally`() {
+        val terrain = flatTerrain(width = 1000, height = 1000, groundY = 500)
+        val a = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val b = testTank(id = 2, ownerId = 2, x = 500f, health = 1000)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, floorType = FloorType.WATER, rng = Random(1))
+        // Neither tank's resting column (500) is anywhere near the map's true bottom, and
+        // currentWaterLevelY starts at terrain.height (1000) with no round having completed
+        // yet - both tanks are entirely dry.
+        val shooter = engine.currentTank!!
+        val target = if (shooter === a) b else a
+        target.health = 1
+
+        val idealPower = CpuAimCalculator.solveIdealPower(shooter, target, terrain, engine.wind)
+        shooter.angleDeg = if (target.x >= shooter.x) 45f else 135f
+        shooter.power = idealPower
+        assertTrue(engine.fire())
+
+        var ticks = 0
+        while (target.alive && ticks < 1000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertFalse("expected the direct hit to kill the target", target.alive)
+
+        var settleTicks = 0
+        while (!target.isAsh && settleTicks < 1000) {
+            engine.tick(1f / 60f)
+            settleTicks++
+        }
+
+        assertTrue("expected the ordinary burn/explosion/ash sequence, not drowning", target.isAsh)
+        assertFalse(target.pendingDrown)
+        assertFalse(target.drowningBubbles)
+        assertFalse(target.drowningSpeech)
+        assertFalse(target.rising)
+        assertFalse(target.isDrowned)
+    }
+
+    @Test
+    fun `a tank that falls into deep water drowns instead of burning, even though a fall - not the round boundary - killed it`() {
+        // A dedicated (all-dry-at-first) trio, unlike waterDrowningTrio - this test needs the
+        // victim to start out shallow like everyone else, only falling into deep water partway
+        // through, so it can't reuse a helper that starts the victim already resting down there.
+        val terrain = flatTerrain(width = 3000, height = 1000, groundY = 100)
+        val victim = testTank(id = 1, ownerId = 1, x = 500f, health = 1000)
+        val victimOwnerMate = testTank(id = 2, ownerId = 1, x = 1000f, health = 1000)
+        val other = testTank(id = 3, ownerId = 2, x = 2500f, health = 1000)
+        val engine = GameEngine(
+            terrain,
+            listOf(victim, victimOwnerMate, other),
+            maxWindMagnitude = 0f,
+            floorType = FloorType.WATER,
+            rng = Random(1),
+        )
+
+        // Round 1 completes safely first (victim's own column is still untouched, so it's dry
+        // like everyone else) - full submersion is mathematically impossible before at least one
+        // round has actually lowered currentWaterLevelY below the map's true bottom (see
+        // waterDrowningTrio's own doc), so a plain fall can't achieve it standalone either.
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        assertEquals(980f, engine.waterLevelY, 0.001f)
+
+        // *Now* deepen victim's own column into a genuine gap gravity hasn't discovered yet
+        // (round 1's own boundary check has already passed, so it never saw this), and lower
+        // its health so the resulting fall damage - not a direct hit, and not this round's own
+        // boundary check - is what actually kills it.
+        terrain.groundY[victim.x.toInt()] = 995
+        victim.health = 1
+
+        // Turn 1 of round 2 - just enough ticks for victim's own fall (and, per the
+        // finishResolution fix, its full drowning animation) to play out, however whose turn
+        // this actually is.
+        fireSafeFillerShot(engine)
+
+        assertFalse("expected the fall into deep water to kill the tank", victim.alive)
+        assertFalse("expected no burn animation from a fall into deep water", victim.burning)
+        assertFalse("expected no pendingBurn either", victim.pendingBurn)
+        assertFalse("expected it to never reach isAsh", victim.isAsh)
+        assertTrue("expected the drowning chain to have finished instead", victim.isDrowned)
+    }
+
+    @Test
+    fun `a projectile landing in open water with no tank there fizzles silently`() {
+        // Unlike the Hole/Void fizzle tests above, this can't reuse "groundY set to the map's
+        // own true bottom" - floorMaxGroundY() never relaxes Water's ordinary 95%-depth clamp,
+        // so handleFloorEdge's own WATER branch (reached only once terrain is carved *all* the
+        // way to terrain.height) is a documented no-op/unreachable case for it, and a projectile
+        // that ends up there would just linger forever instead of fizzling. WATER's fizzle logic
+        // instead lives in tickProjectiles' ordinary groundedThisTick branch - reachable for any
+        // depth below the *current* water line that still leaves a sliver of real floor (< the
+        // map's true bottom), which also means fizzling needs at least one round to have already
+        // lowered the water below the map's own maximum carvable depth (see waterDrowningTrio's
+        // own doc on why full submersion needs at least one round too).
+        val terrain = flatTerrain(width = 1000, height = 1000, groundY = 100)
+        val a = testTank(id = 1, ownerId = 1, x = 100f, health = 1000)
+        val b = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, floorType = FloorType.WATER, rng = Random(1))
+
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        assertEquals(980f, engine.waterLevelY, 0.001f)
+        // Drains the two filler shots' own (real, ordinary) impact events so the final
+        // drainEvents() assertion below only reflects this test's own fizzle shot.
+        engine.drainEvents()
+
+        // Moves the current tank onto a dedicated "nobody else is here" column, well clear of
+        // the other tank, and deepens *only* that column below the new water line - a straight-
+        // down shot (zero horizontal velocity, no wind) lands exactly there with no horizontal-
+        // drift uncertainty, mirroring the existing Hole/Void fizzle tests' own "fire straight
+        // down from directly above the target column" approach. A single deepened column is
+        // safe to fire from here (unlike waterDrowningTrio's wide wells) precisely because this
+        // shot can never detonate at all - there's nothing for it to splash back onto itself.
+        val shooter = engine.currentTank!!
+        val targetColumn = 500
+        shooter.x = targetColumn.toFloat()
+        shooter.y = terrain.heightAt(targetColumn).toFloat()
+        terrain.groundY[targetColumn] = 990
+        shooter.angleDeg = 270f
+        shooter.power = 50f
+        engine.fire()
+
+        var ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the projectile to vanish rather than linger", engine.projectiles.isEmpty())
+        assertTrue("expected no explosion effect from a fizzle", engine.impactEffects.isEmpty())
+        assertTrue("fizzle should not register as a scored impact", engine.drainEvents().none { it == GameEvent.Impact })
+        assertEquals("expected no crater carved at the fizzle column", 990, terrain.groundY[targetColumn])
+    }
+
+    @Test
+    fun `a projectile landing on dry terrain above the water line under Water floor still detonates normally`() {
+        val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f, health = 1000)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.WATER, rng = Random(1))
+        shooter.angleDeg = 270f
+        shooter.power = 50f
+        engine.fire()
+
+        var ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the projectile to detonate rather than fizzle", engine.projectiles.isEmpty())
+        assertTrue("expected a real explosion effect", engine.impactEffects.isNotEmpty())
+        assertTrue("expected the detonation to carve into terrain", terrain.groundY[100] > 50)
+    }
+
+    @Test
+    fun `splash damage from a dry-ground explosion still reaches a fully submerged tank nearby`() {
+        val terrain = flatTerrain(width = 1000, height = 1000, groundY = 970)
+        val t1 = testTank(id = 1, ownerId = 1, x = 100f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 500f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, floorType = FloorType.WATER, rng = Random(1))
+
+        // Round 1 completes uneventfully - groundY=970 stays well above round 1's own new
+        // water level (1000 - 2%*1000 = 980), so nobody is anywhere near submerged yet.
+        fireSafeFillerShot(engine)
+        fireSafeFillerShot(engine)
+        val waterLevelAfterRound1 = engine.waterLevelY
+        assertEquals(980f, waterLevelAfterRound1, 0.001f)
+
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        shooter.currentWeapon = WeaponType.BIG_BERTHA
+
+        // Manually deepen just the victim's own column into a "hole" that's now underwater -
+        // fully submerged (its topmost point 5 units below the surface) - and keep terrain
+        // consistent so the next gravity tick doesn't yank it back up or apply incidental fall
+        // damage that would confound this test's own damage assertion. Mirrors the existing
+        // Lava round-damage test's own direct victim.x/y reassignment.
+        val submergedY = waterLevelAfterRound1 + Tank.RADIUS + 5f
+        terrain.groundY[victim.x.toInt()] = submergedY.toInt()
+        victim.y = submergedY
+        assertTrue("expected victim to actually be fully submerged now", victim.y - Tank.RADIUS >= engine.waterLevelY)
+
+        // Fires at a dry column right beside the victim (still 970, well above the water line)
+        // - close enough that Big Bertha's blast radius reaches the submerged victim, but not a
+        // direct hit on it.
+        fireAtX(engine, victim.x - 25f)
+
+        assertTrue("expected the splash to have actually damaged the submerged victim", victim.health < 1000)
+    }
+
     // --- Void: region seeding and per-round growth -------------------------------------------
 
     @Test
@@ -513,5 +908,42 @@ class GameEngineFloorTypeTest {
         fireSafeFillerShot(engine)
 
         assertEquals(1000 - 25 - 10, victim.health)
+    }
+
+    @Test
+    fun `a Lava round-kill also drives its death animation to completion instead of freezing`() {
+        // Same setup as the Lava round-damage test above (groundY=985 puts the region's own
+        // depth cap within vertical-proximity range of undisturbed terrain).
+        val terrain = flatTerrain(width = 1000, height = 1000, groundY = 985)
+        val t1 = testTank(id = 1, ownerId = 1, x = 500f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 100f, health = 1000)
+        t1.currentWeapon = WeaponType.BIG_BERTHA
+        t2.currentWeapon = WeaponType.BIG_BERTHA
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, floorType = FloorType.LAVA, rng = Random(1))
+
+        val firer = engine.currentTank!!
+        val victim = if (firer === t1) t2 else t1
+        firer.angleDeg = 45f
+        firer.power = 30f
+        engine.fire()
+        runUntilNotResolving(engine)
+
+        assertEquals(1, engine.lavaRegions.size)
+        val region = engine.lavaRegions.single()
+        victim.x = region.centerX
+        victim.y = terrain.heightAt(victim.x.toInt()).toFloat()
+        // Lowered to exactly the touch-damage amount (LAVA_TOUCH_DAMAGE_FRACTION * MAX_HEALTH)
+        // right before the round-completing shot, so this round's own touch damage actually
+        // zeroes it out and triggers a real kill, not just more survivable proximity damage.
+        victim.health = 25
+
+        // Completes the round (the seeding shot above was turn 1 of 2) - this call's own
+        // runUntilNotResolving must wait out the full death animation (the finishResolution fix
+        // under test) rather than returning with the tank frozen mid-animation, which would
+        // also make it hang against runUntilNotResolving's own maxTicks guard.
+        fireSafeFillerShot(engine)
+
+        assertFalse("expected the round's touch damage to actually kill the victim", victim.alive)
+        assertTrue("expected the death animation to have fully completed, not frozen mid-way", victim.isAsh)
     }
 }

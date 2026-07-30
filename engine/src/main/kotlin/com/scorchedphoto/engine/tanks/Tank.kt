@@ -40,6 +40,23 @@ data class Tank(
     var fallingThroughFloor: Boolean = false,
     var fallThroughElapsed: Float = 0f,
     var fallThroughAnchorY: Float = 0f,
+    // FloorType.WATER's drowning sequence, taken instead of the ordinary burn/explosion/ash
+    // chain whenever this tank is fully submerged when it dies - see GameEngine.killOrDrown.
+    // Bubbles (+ a bubbling sound) first, then a death-taunt speech bubble, then a flip-upside-
+    // down-and-float-to-the-surface animation, then permanently floating at the (still-rising)
+    // water surface - see GameEngine.killByDrowning and its onward update*/startPendingDrowns
+    // chain, mirroring the burn chain's own one-boolean-plus-elapsed-per-phase shape exactly.
+    var pendingDrown: Boolean = false,
+    var drowningBubbles: Boolean = false,
+    var drowningBubblesElapsed: Float = 0f,
+    var drowningSpeech: Boolean = false,
+    var drowningSpeechElapsed: Float = 0f,
+    var rising: Boolean = false,
+    var risingElapsed: Float = 0f,
+    // Set once the rise animation finishes; permanent for the rest of the match - the renderer
+    // draws this tank upside-down at the live water surface from then on, tracking it as it
+    // keeps rising (see GameEngine.updateRisingTanks), the drowning equivalent of isAsh.
+    var isDrowned: Boolean = false,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {
