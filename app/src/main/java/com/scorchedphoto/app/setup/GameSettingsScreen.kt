@@ -16,8 +16,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.scorchedphoto.app.game.colorFor
 import com.scorchedphoto.engine.EdgeType
 
 @Composable
@@ -47,12 +49,22 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
     }
 }
 
+/** [colorFor] returns an [android.graphics.Color] Int (ARGB) - [GameRenderer] draws directly
+ * with that, but Compose's [Text] wants its own [androidx.compose.ui.graphics.Color] type, so
+ * every option's text color here goes through this converter. [EdgeType.NONE] has no color
+ * ([colorFor] returns null), and its dropdown text falls back to [Color.Unspecified] (the
+ * theme's own default) rather than a hardcoded one. */
+private fun edgeTypeTextColor(edgeType: EdgeType): Color = colorFor(edgeType)?.let(::Color) ?: Color.Unspecified
+
 @Composable
 private fun EdgeTypeDropdown(selected: EdgeType?, onSelect: (EdgeType?) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         Button(onClick = { expanded = true }) {
-            Text(selected?.displayName ?: "Random")
+            Text(
+                selected?.displayName ?: "Random",
+                color = selected?.let { edgeTypeTextColor(it) } ?: Color.Unspecified,
+            )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
@@ -64,7 +76,7 @@ private fun EdgeTypeDropdown(selected: EdgeType?, onSelect: (EdgeType?) -> Unit)
             )
             EdgeType.entries.forEach { edgeType ->
                 DropdownMenuItem(
-                    text = { Text(edgeType.displayName) },
+                    text = { Text(edgeType.displayName, color = edgeTypeTextColor(edgeType)) },
                     onClick = {
                         onSelect(edgeType)
                         expanded = false

@@ -5,10 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import com.scorchedphoto.engine.BounceEffect
 import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.ImpactEffect
@@ -74,6 +76,7 @@ class GameRenderer(
         strokeCap = Paint.Cap.ROUND
     }
     private val edgeBorderPaint = Paint().apply { style = Paint.Style.FILL }
+    private val wrapGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val fireFramePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true; alpha = FIRE_ALPHA }
     private val ashPilePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ashSpeckPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -161,6 +164,15 @@ class GameRenderer(
     // AIMING (during which GameLoopThread doesn't call engine.tick at all).
     private var flashTankId: Int? = null
     private var flashStartNanos: Long = 0L
+
+    // Baseline for EdgeType.WRAP's glitter twinkle animation (see drawWrapEffects) - wall-clock
+    // based like flashStartNanos above, so it keeps animating smoothly even while the engine
+    // itself is paused on AIMING. The two sparkle layouts (one for the wall edges, mirrored
+    // between left/right; one for the ceiling edge) are generated once, deterministically, and
+    // reused every frame - only their twinkle phase changes, not their positions.
+    private val wrapEffectsStartNanos = System.nanoTime()
+    private val wallWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 4242) }
+    private val ceilingWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 9191) }
 
     // The cached static-layer bitmap/canvas (tank bodies/barrels, ash piles, drawn on top of
     // the terrain layer below) plus the WorldTransform it was drawn with - recreated only when
@@ -327,33 +339,138 @@ class GameRenderer(
         val width = canvas.width.toFloat()
         val height = canvas.height.toFloat()
         if (width <= 0f || height <= 0f) return
-        val thickness = (min(width, height) * EDGE_BORDER_THICKNESS_FRACTION).coerceAtLeast(1f)
+        val thickness = borderThickness(canvas)
 
-        borderColorFor(wallType)?.let { color ->
+        colorFor(wallType)?.let { color ->
             edgeBorderPaint.color = color
             canvas.drawRect(0f, 0f, thickness, height, edgeBorderPaint)
             canvas.drawRect(width - thickness, 0f, width, height, edgeBorderPaint)
         }
-        borderColorFor(ceilingType)?.let { color ->
+        colorFor(ceilingType)?.let { color ->
             edgeBorderPaint.color = color
             canvas.drawRect(0f, 0f, width, thickness, edgeBorderPaint)
         }
     }
 
-    /** Each real [EdgeType]'s own distinct, noticeably-different-from-the-others border
-     * color - reuses the same colors as their bounce-mark animations (see
-     * [drawPaddedMark]/[drawRubberMark]/[drawSpringMark]/[drawReflectiveMark]/[drawWrapMark])
-     * for visual consistency between the two. [EdgeType.NONE] has no border ([null]).
-     */
-    private fun borderColorFor(edgeType: EdgeType): Int? = when (edgeType) {
-        EdgeType.NONE -> null
-        EdgeType.PADDED -> Color.rgb(0x66, 0xBB, 0x6A) // green
-        EdgeType.RUBBER -> Color.rgb(0xFF, 0xA7, 0x26) // orange
-        EdgeType.SPRING -> Color.rgb(0x29, 0xB6, 0xF6) // cyan
-        EdgeType.REFLECTIVE -> Color.rgb(0xFF, 0xFF, 0xFF) // white
-        EdgeType.WRAP -> Color.rgb(0x7E, 0x57, 0xC2) // violet
-        EdgeType.BLAST_STEEL -> Color.rgb(0x90, 0xA4, 0xAE) // steel blue-grey
+    /** Screen-edge border thickness, shared by [drawEdgeBorders] and [drawWrapEffects] so the
+     * glow/sparkles line up exactly against the solid border they extend from. */
+    private fun borderThickness(canvas: Canvas): Float {
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return 0f
+        return (min(width, height) * EDGE_BORDER_THICKNESS_FRACTION).coerceAtLeast(1f)
     }
+
+    /** [EdgeType.WRAP]'s extra "mystical" flourish - a soft yellow glow bleeding inward from
+     * just past the solid border (see [colorFor]), plus a field of twinkling glitter specks
+     * scattered across the border and glow band. Unlike [drawEdgeBorders] (drawn once into the
+     * cached terrain layer, since a plain solid-color border never changes on its own), this
+     * animates continuously - twinkle phase and alpha both depend on wall-clock elapsed time -
+     * so it's drawn fresh every frame as part of the dynamic overlay, on top of the static
+     * terrain/tank layers, for whichever of [wallType]/[ceilingType] is actually [EdgeType.WRAP].
+     */
+    private fun drawWrapEffects(canvas: Canvas) {
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+        val thickness = borderThickness(canvas)
+        val glowWidth = thickness * WRAP_GLOW_WIDTH_MULTIPLIER
+        // Sparkles are allowed to appear anywhere from the screen edge (0) through the end of
+        // the glow's own reach - a wider span than the glow rect itself, which only covers the
+        // fade-out past the solid border.
+        val bandWidth = thickness + glowWidth
+        val elapsedSeconds = (System.nanoTime() - wrapEffectsStartNanos) / 1_000_000_000f
+        val wrapColor = colorFor(EdgeType.WRAP)!!
+
+        if (wallType == EdgeType.WRAP) {
+            // Left edge: glow fades outward from the border's own inner edge (x=thickness).
+            drawWrapGlowBand(
+                canvas,
+                RectF(thickness, 0f, thickness + glowWidth, height),
+                gradientStartX = thickness, gradientStartY = 0f, gradientEndX = thickness + glowWidth, gradientEndY = 0f,
+                color = wrapColor,
+            )
+            // Right edge: mirrored - glow fades outward from x=(width-thickness).
+            drawWrapGlowBand(
+                canvas,
+                RectF(width - thickness - glowWidth, 0f, width - thickness, height),
+                gradientStartX = width - thickness, gradientStartY = 0f, gradientEndX = width - thickness - glowWidth, gradientEndY = 0f,
+                color = wrapColor,
+            )
+            drawWrapSparkles(canvas, wallWrapSparkles, elapsedSeconds) { along, depth -> depth * bandWidth to along * height }
+            drawWrapSparkles(canvas, wallWrapSparkles, elapsedSeconds) { along, depth -> (width - depth * bandWidth) to along * height }
+        }
+        if (ceilingType == EdgeType.WRAP) {
+            drawWrapGlowBand(
+                canvas,
+                RectF(0f, thickness, width, thickness + glowWidth),
+                gradientStartX = 0f, gradientStartY = thickness, gradientEndX = 0f, gradientEndY = thickness + glowWidth,
+                color = wrapColor,
+            )
+            drawWrapSparkles(canvas, ceilingWrapSparkles, elapsedSeconds) { along, depth -> along * width to depth * bandWidth }
+        }
+    }
+
+    /** One translucent gradient rect covering [rect], brightest at (gradientStartX,
+     * gradientStartY) - the solid border's own inner edge - and fully faded to transparent by
+     * (gradientEndX, gradientEndY), further into the play area. */
+    private fun drawWrapGlowBand(
+        canvas: Canvas,
+        rect: RectF,
+        gradientStartX: Float,
+        gradientStartY: Float,
+        gradientEndX: Float,
+        gradientEndY: Float,
+        color: Int,
+    ) {
+        val glowColor = Color.argb(WRAP_GLOW_ALPHA, Color.red(color), Color.green(color), Color.blue(color))
+        wrapGlowPaint.shader = LinearGradient(gradientStartX, gradientStartY, gradientEndX, gradientEndY, glowColor, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        canvas.drawRect(rect, wrapGlowPaint)
+    }
+
+    /** Twinkling glitter specks across a WRAP edge's border+glow band - [toScreen] maps each
+     * sparkle's own normalized (along-the-edge, depth-into-the-band) position to real screen
+     * coordinates, so the same sparkle layout/timing can be reused for the mirrored left/right
+     * wall edges (see [drawWrapEffects]) without duplicating the twinkle math itself. */
+    private fun drawWrapSparkles(
+        canvas: Canvas,
+        sparkles: List<WrapSparkle>,
+        elapsedSeconds: Float,
+        toScreen: (along: Float, depth: Float) -> Pair<Float, Float>,
+    ) {
+        edgeMarkPaint.shader = null
+        edgeMarkPaint.style = Paint.Style.FILL
+        for (sparkle in sparkles) {
+            val twinkle = 0.5f + 0.5f * sin(sparkle.phase + elapsedSeconds * sparkle.twinkleSpeed)
+            val alpha = (WRAP_SPARKLE_MIN_ALPHA + (WRAP_SPARKLE_MAX_ALPHA - WRAP_SPARKLE_MIN_ALPHA) * twinkle).toInt()
+            edgeMarkPaint.color = Color.argb(alpha, 0xFF, 0xFF, 0xE0) // warm white-yellow glitter
+            val (x, y) = toScreen(sparkle.alongFraction, sparkle.depthFraction)
+            canvas.drawCircle(x, y, sparkle.radius, edgeMarkPaint)
+        }
+    }
+
+    private fun generateWrapSparkles(seed: Int): List<WrapSparkle> {
+        val rng = kotlin.random.Random(seed)
+        return (0 until WRAP_SPARKLE_COUNT).map {
+            WrapSparkle(
+                alongFraction = rng.nextFloat(),
+                depthFraction = rng.nextFloat(),
+                phase = rng.nextFloat() * (2f * Math.PI.toFloat()),
+                twinkleSpeed = 1.5f + rng.nextFloat() * 2.5f,
+                radius = 1.5f + rng.nextFloat() * 2f,
+            )
+        }
+    }
+
+    /** One glitter speck's layout within a WRAP edge's border+glow band, normalized so the same
+     * list works regardless of the real band's pixel size - see [drawWrapSparkles]. */
+    private data class WrapSparkle(
+        val alongFraction: Float,
+        val depthFraction: Float,
+        val phase: Float,
+        val twinkleSpeed: Float,
+        val radius: Float,
+    )
 
     /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
      * doc - into [staticLayerCanvas]: the cached terrain layer as a base, then every tank's
@@ -391,6 +508,7 @@ class GameRenderer(
         firingTankId: Int?,
         firingMessage: String?,
     ) {
+        drawWrapEffects(canvas)
         drawImpactEffects(canvas, impactEffects, transform)
         drawBounceEffects(canvas, bounceEffects, transform)
 
@@ -563,17 +681,19 @@ class GameRenderer(
         }
     }
 
-    /** Soft green squash: starts wide-and-flat, relaxes toward round as it fades. */
+    /** Soft baby-blue squash: starts wide-and-flat, relaxes toward round as it fades. */
     private fun drawPaddedMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
-        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0x66, 0xBB, 0x6A)
+        val c = colorFor(EdgeType.PADDED)!!
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), Color.red(c), Color.green(c), Color.blue(c))
         val squash = 1f - growFraction * 0.6f
         edgeMarkRect.set(cx - radius * 2f, cy - radius * squash, cx + radius * 2f, cy + radius * squash)
         canvas.drawOval(edgeMarkRect, edgeMarkPaint)
     }
 
-    /** Orange starburst: 6 lines snap outward from the point, then fade. */
+    /** Pink starburst: 6 lines snap outward from the point, then fade. */
     private fun drawRubberMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
-        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0xFF, 0xA7, 0x26)
+        val c = colorFor(EdgeType.RUBBER)!!
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), Color.red(c), Color.green(c), Color.blue(c))
         edgeMarkPaint.strokeWidth = 2f
         val length = radius * 1.5f * growFraction
         for (i in 0 until 6) {
@@ -611,11 +731,12 @@ class GameRenderer(
         canvas.drawLine(cx - diag, cy + diag, cx + diag, cy - diag, edgeMarkPaint)
     }
 
-    /** Violet stroked ring that pops (grows then shrinks) at both the exit and entry point
+    /** Yellow stroked ring that pops (grows then shrinks) at both the exit and entry point
      * of a teleport - [BounceEffect] doesn't distinguish which end this is, so both use the
      * same simple pop animation. */
     private fun drawWrapMark(canvas: Canvas, cx: Float, cy: Float, radius: Float, growFraction: Float, alphaMult: Float) {
-        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), 0x7E, 0x57, 0xC2)
+        val c = colorFor(EdgeType.WRAP)!!
+        edgeMarkPaint.color = Color.argb((alphaMult * 255).toInt(), Color.red(c), Color.green(c), Color.blue(c))
         edgeMarkPaint.style = Paint.Style.STROKE
         edgeMarkPaint.strokeWidth = 3f
         val r = radius * (0.3f + growFraction * 0.7f)
@@ -824,6 +945,16 @@ class GameRenderer(
         // around the play area, not a feature of the world, so it should look the same
         // thickness regardless of how zoomed-in the terrain itself is.
         private const val EDGE_BORDER_THICKNESS_FRACTION = 0.02f
+
+        // EdgeType.WRAP's extra glow/glitter flourish - see drawWrapEffects. The glow extends
+        // this many border-thicknesses beyond the solid border itself, fading from WRAP_GLOW_ALPHA
+        // down to fully transparent; sparkle alpha oscillates between the min/max bounds as it
+        // twinkles, drawn as small warm-white specks scattered across the border+glow band.
+        private const val WRAP_GLOW_WIDTH_MULTIPLIER = 2.5f
+        private const val WRAP_GLOW_ALPHA = 90
+        private const val WRAP_SPARKLE_COUNT = 26
+        private const val WRAP_SPARKLE_MIN_ALPHA = 40
+        private const val WRAP_SPARKLE_MAX_ALPHA = 230
         private const val PROJECTILE_RADIUS = 5f
         private const val BARREL_STROKE_WIDTH = 1.25f
 
