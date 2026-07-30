@@ -388,6 +388,41 @@ class GameEngineFloorTypeTest {
         assertEquals(0.02f * terrain.width, radiusAfterRound - radiusAfterSeed, 1f)
     }
 
+    @Test
+    fun `Void region growth pushes no ImpactEffect - growing a region is silent and invisible`() {
+        val terrain = flatTerrain(width = 1000, height = 1000, groundY = 980)
+        // Same setup as the growth test above - two tanks parked far apart and never moved, so a
+        // round can actually complete (2 tanks, 2 turns) with no collision risk.
+        val a = testTank(id = 1, ownerId = 1, x = 100f, health = 1000)
+        val b = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, floorType = FloorType.VOID, rng = Random(1))
+
+        val seeder = engine.currentTank!!
+        seeder.angleDeg = 45f
+        seeder.power = 30f
+        engine.fire()
+        runUntilNotResolving(engine) // seeds the region (+ its own immediate growth)
+
+        val centerX = engine.voidRegions.single().centerX
+        val radiusBeforeRound = engine.voidRegions.single().radius
+        fireAtX(engine, centerX) // completes the round (2 tanks, 2 turns), growing the region again
+
+        // The round-boundary growth happens at the very tail of the resolving tick, right as
+        // phase leaves RESOLVING - tick() becomes a no-op once phase is AIMING/GAME_OVER, so an
+        // ImpactEffect pushed there would never get a chance to age out and would sit frozen in
+        // engine.impactEffects forever. Asserting it's empty here is a real regression check
+        // (it would fail if growRegion still pushed one), not just an artifact of effects having
+        // had time to age out naturally.
+        assertTrue(
+            "expected round-boundary region growth to push no ImpactEffect at all",
+            engine.impactEffects.isEmpty(),
+        )
+        assertTrue(
+            "expected the region to still have grown from the round boundary despite no visible effect",
+            engine.voidRegions.single().radius > radiusBeforeRound,
+        )
+    }
+
     // --- Lava: depth-capped growth and round damage ------------------------------------------
 
     @Test

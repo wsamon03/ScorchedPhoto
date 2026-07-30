@@ -508,14 +508,14 @@ class GameEngine(
      * re-carves the full circle centered at the map's true bottom (the same "genuinely
      * embedded" collapse [CraterCarver] already applies for a deep-enough impact - see its own
      * doc), clamped to [FloorRegion.depthCapGroundY] for Lava or the map's own bottom for Void.
-     * Pushes a fresh [ImpactEffect] at the new size so the renderer's existing explosion grow/
-     * hold/fade animation plays exactly as if a real blast had just gone off there - literally
-     * reusing that animation rather than inventing a new one. */
+     * Deliberately pushes no [ImpactEffect] - unlike a real weapon impact (see [resolveImpact]),
+     * this growth is silent and invisible: the ground itself still visibly opens wider (the
+     * renderer's own Void/Lava fill redraws automatically whenever [CraterCarver.carve] bumps
+     * [HeightMap.version]), it just doesn't get an explosion flash on top of it. */
     private fun growRegion(region: FloorRegion) {
         region.radius += FLOOR_REGION_GROWTH_FRACTION * terrain.width
         val maxGroundY = region.depthCapGroundY ?: terrain.height
         CraterCarver.carve(terrain, region.centerX.toInt(), terrain.height, region.radius.toInt(), maxGroundY)
-        activeImpactEffects += ImpactEffect(region.centerX, terrain.height.toFloat(), region.radius)
     }
 
     /** Fires once every completed round (see [finishResolution]) for whichever mechanic
