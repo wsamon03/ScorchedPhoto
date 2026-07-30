@@ -32,6 +32,14 @@ data class Tank(
     // Set once the death explosion fires; permanent for the rest of the match - the
     // renderer draws an ash pile in place of the tank body from then on.
     var isAsh: Boolean = false,
+    // Set when this tank settles onto a column with no floor left at all (FloorType.HOLE/
+    // WRAP/VOID) - see GameEngine.killByFallingThroughFloor. No burn/explosion/ash animation
+    // plays; the renderer draws only this tank's usual death-taunt speech bubble, anchored at
+    // fallThroughAnchorY, for as long as this stays true (see
+    // GameEngine.updateFallingThroughFloor).
+    var fallingThroughFloor: Boolean = false,
+    var fallThroughElapsed: Float = 0f,
+    var fallThroughAnchorY: Float = 0f,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {

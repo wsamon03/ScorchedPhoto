@@ -12,11 +12,14 @@ import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.stepProjectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.terrain.CraterCarver
+import com.scorchedphoto.engine.terrain.FloorRegion
 import com.scorchedphoto.engine.turns.TurnManager
 import com.scorchedphoto.engine.turns.WinResult
 import com.scorchedphoto.terrain.HeightMap
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 enum class MatchPhase { AIMING, FIRING, RESOLVING, GAME_OVER }
@@ -39,6 +42,7 @@ class GameEngine(
     val maxWindMagnitude: Float = 15f,
     val wallType: EdgeType = EdgeType.NONE,
     val ceilingType: EdgeType = EdgeType.NONE,
+    val floorType: FloorType = FloorType.GROUND,
     private val rng: Random = Random.Default,
 ) {
     // Shuffled once per match so turn order isn't always the order tanks were configured in -
@@ -79,6 +83,37 @@ class GameEngine(
      * size isn't known until a surface actually exists.
      */
     var ceilingWrapDepthY: Float = terrain.height.toFloat()
+
+    /** World-space Y a floor-WRAP'd projectile reappears at (see [handleFloorEdge]'s WRAP
+     * branch) - "just below the top border, not colliding with it," mirroring
+     * [ceilingWrapDepthY] but for the opposite edge. Defaults to `0f` (the world's own top)
+     * until a caller with the real rendered canvas geometry overrides it. */
+    var floorWrapDepthY: Float = 0f
+
+    private val activeVoidRegions = mutableListOf<FloorRegion>()
+    private val activeLavaRegions = mutableListOf<FloorRegion>()
+
+    /** [FloorType.VOID]'s independently-growing open-floor regions - see [growRegion]/
+     * [processFloorRound]. Empty unless [floorType] is [FloorType.VOID]. */
+    val voidRegions: List<FloorRegion> get() = activeVoidRegions
+
+    /** [FloorType.LAVA]'s independently-growing, depth-capped regions - see [growRegion]/
+     * [applyLavaRoundDamage]. Empty unless [floorType] is [FloorType.LAVA]. */
+    val lavaRegions: List<FloorRegion> get() = activeLavaRegions
+
+    private var currentWaterLevelY: Float = terrain.height.toFloat()
+
+    /** [FloorType.WATER]'s current rising surface - starts at [HeightMap.height] (invisible,
+     * right at the bottom edge) and decreases by [WATER_RISE_FRACTION] of it every round (see
+     * [raiseWaterLevel]). Only meaningful when [floorType] is [FloorType.WATER]. */
+    val waterLevelY: Float get() = currentWaterLevelY
+
+    // "A round" (see processFloorRound) has no prior concept anywhere in this engine - only
+    // individual turns did. Counting completed turns against however many tanks were alive when
+    // the round started (rather than tracking a specific "round-starting tank" identity) stays
+    // correct even if a tank dies mid-round. See finishResolution.
+    private var turnsCompletedThisRound = 0
+    private var tanksAliveAtRoundStart = tanks.count { it.alive }
 
     val currentTank: Tank? get() = turnManager.currentTank
     val projectiles: List<Projectile> get() = activeProjectiles
@@ -140,6 +175,7 @@ class GameEngine(
         updateBurningTanks(dt)
         updateAwaitingExplosion(dt)
         updateExploding(dt)
+        updateFallingThroughFloor(dt)
         startPendingBurns()
 
         // Explosions (from projectiles still flying or still-animating impact flashes)
@@ -151,8 +187,13 @@ class GameEngine(
         // redundant against explosionsDone's activeImpactEffects.isEmpty() gate:
         // DEATH_EXPLOSION_GROWTH_SECONDS is strictly less than the impact effect's own
         // IMPACT_EFFECT_LIFETIME_SECONDS, so activeImpactEffects is guaranteed still
-        // non-empty for as long as any tank.exploding is true.
-        val deathAnimationsDone = tanks.none { it.burning || it.pendingBurn || it.awaitingExplosion || it.exploding }
+        // non-empty for as long as any tank.exploding is true. it.fallingThroughFloor has no
+        // such effect-based backstop (a fall-through death plays no explosion at all - see
+        // killByFallingThroughFloor) so it's checked directly, for the same reason: don't let
+        // the round resolve out from under a still-playing death-taunt speech bubble.
+        val deathAnimationsDone = tanks.none {
+            it.burning || it.pendingBurn || it.awaitingExplosion || it.exploding || it.fallingThroughFloor
+        }
         if (explosionsDone && tanks.none { it.falling } && deathAnimationsDone) {
             finishResolution()
         } else {
@@ -194,8 +235,11 @@ class GameEngine(
             // via findTerrainCrossing below - so this can never shift a collision into or out of
             // a tick that would otherwise have gone to the wall/ceiling/fizzle branches (e.g. a
             // shot crossing x<=0 close to the ground, meant to bounce/detonate off the wall
-            // rather than hit "terrain" at the clamped column 0).
-            val groundedThisTick = !touchedTank && p.y >= terrainY
+            // rather than hit "terrain" at the clamped column 0). `terrainY < terrain.height`
+            // additionally excludes a column floorType has fully hollowed out (a phantom
+            // "surface" right at the map's true bottom) - a projectile reaching that isn't
+            // grounded on real terrain, it's reached the floor-edge branch below instead.
+            val groundedThisTick = !touchedTank && p.y >= terrainY && terrainY < terrain.height
 
             when {
                 // Impact point is always anchored to the ground surface, never floating in
@@ -222,6 +266,7 @@ class GameEngine(
                     handleEdgeBounce(iterator, p, wallType, isWall = true)
                 ceilingType != EdgeType.NONE && p.y <= 0f ->
                     handleEdgeBounce(iterator, p, ceilingType, isWall = false)
+                p.y >= terrain.height -> handleFloorEdge(iterator, p)
                 p.x < -terrain.width || p.x > 2 * terrain.width -> iterator.remove() // fizzle, flew off into the void
             }
         }
@@ -336,6 +381,52 @@ class GameEngine(
     }
 
     /**
+     * Applied when a still-flying projectile reaches the true bottom of the map (`p.y >=
+     * terrain.height`) - only reachable at all once [floorType] has let a column be fully
+     * hollowed out (see [floorMaxGroundY]; GROUND/WATER/LAVA never relax the ordinary 95%-depth
+     * clamp, so this branch is unreachable for them - included below only for [when]'s
+     * exhaustiveness). BLAST_STEEL detonates in place, reusing the existing impact pipeline
+     * wholesale; WRAP teleports it to [floorWrapDepthY] with velocity untouched and keeps it
+     * flying - the same teleport-and-continue pattern wall-WRAP uses, deliberately *not*
+     * ceiling-WRAP's detonate-immediately (a floor wrap's reappearance point, just under the top
+     * border, is never itself embedded in solid ground the way ceiling-WRAP's is, so there's no
+     * reason to cut its flight short); HOLE/VOID fizzle silently - there's genuinely no terrain
+     * there to explode into, and letting a projectile fly forever over open floor would
+     * otherwise stall [tick]'s resolution-completion check; the remaining four types bounce off
+     * the phantom floor exactly like they'd bounce off a wall, reusing the same
+     * [velocityRetention] values and [BounceEffect] visuals (via [EdgeType], used here purely as
+     * a shared rendering vocabulary between wall/ceiling/floor bounces, not because a floor
+     * bounce is "a wall").
+     */
+    private fun handleFloorEdge(iterator: MutableIterator<Projectile>, p: Projectile) {
+        when (floorType) {
+            FloorType.BLAST_STEEL -> {
+                resolveImpact(p.weapon, p.x, p.y)
+                pendingEvents += GameEvent.Impact
+                iterator.remove()
+            }
+            FloorType.WRAP -> {
+                activeBounceEffects += BounceEffect(p.x, p.y, EdgeType.WRAP) // exit, at the floor
+                p.y = floorWrapDepthY
+                activeBounceEffects += BounceEffect(p.x, p.y, EdgeType.WRAP) // entry, just below the top border
+            }
+            FloorType.HOLE, FloorType.VOID -> iterator.remove()
+            FloorType.PADDED, FloorType.RUBBER, FloorType.SPRING, FloorType.REFLECTIVE -> {
+                val edgeType = when (floorType) {
+                    FloorType.PADDED -> EdgeType.PADDED
+                    FloorType.RUBBER -> EdgeType.RUBBER
+                    FloorType.SPRING -> EdgeType.SPRING
+                    else -> EdgeType.REFLECTIVE
+                }
+                p.y = terrain.height.toFloat()
+                p.vy = -p.vy * velocityRetention(edgeType)
+                activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
+            }
+            FloorType.GROUND, FloorType.WATER, FloorType.LAVA -> Unit // unreachable, see doc above
+        }
+    }
+
+    /**
      * Carves the terrain and damages every alive tank within reach exactly like a real
      * weapon impact - shared by actual projectile impacts and a dying tank's own death
      * blast (see [updateAwaitingExplosion]), so the two affect the ground and nearby tanks
@@ -347,8 +438,9 @@ class GameEngine(
      * source, since a shell landing and a tank's own death blast sound different.
      */
     private fun resolveImpact(weapon: Weapon, impactX: Float, impactY: Float) {
-        CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt())
+        CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt(), floorMaxGroundY())
         activeImpactEffects += ImpactEffect(impactX, impactY, weapon.blastRadius)
+        maybeSeedFloorRegion(impactX, impactY, weapon.blastRadius)
         for (tank in tanks) {
             if (!tank.alive) continue
             val damage = DamageCalculator.computeDamage(weapon, impactX, impactY, tank)
@@ -378,6 +470,151 @@ class GameEngine(
         killedThisResolution += tank.id
     }
 
+    /** How deep an ordinary weapon/death-explosion impact (see [resolveImpact]) is allowed to
+     * carve: [FloorType.GROUND]/[FloorType.WATER]/[FloorType.LAVA] keep the default 95%-depth
+     * clamp (a thin floor strip always survives - Lava's own 4% depth cap only bounds its own
+     * tracked regions' regrowth, see [growRegion], not ordinary gunfire); every other floor
+     * type allows a blast to fully hollow a column down to the map's true bottom. */
+    private fun floorMaxGroundY(): Int = when (floorType) {
+        FloorType.GROUND, FloorType.WATER, FloorType.LAVA -> CraterCarver.defaultMaxGroundY(terrain)
+        else -> terrain.height
+    }
+
+    /** [FloorType.VOID]/[FloorType.LAVA] each spawn their own independently-growing
+     * [FloorRegion] the first time an explosion's own blast geometry reaches the map's true
+     * bottom in a spot no existing region (for that floor type) already covers - grown once
+     * immediately here (per [FloorType.VOID]'s own "immediately upon creation" spec, extended
+     * to Lava for consistency), then again every completed round (see [processFloorRound]). */
+    private fun maybeSeedFloorRegion(impactX: Float, impactY: Float, blastRadius: Float) {
+        val regions = when (floorType) {
+            FloorType.VOID -> activeVoidRegions
+            FloorType.LAVA -> activeLavaRegions
+            else -> return
+        }
+        if (impactY + blastRadius < terrain.height) return
+        if (regions.any { abs(impactX - it.centerX) <= it.radius }) return
+        val column = impactX.toInt().coerceIn(0, terrain.width - 1)
+        val depthCap = if (floorType == FloorType.LAVA) {
+            (terrain.groundY[column] + (terrain.height * LAVA_DEPTH_CAP_FRACTION).roundToInt()).coerceAtMost(terrain.height)
+        } else {
+            null
+        }
+        val region = FloorRegion(impactX, blastRadius, depthCap)
+        regions += region
+        growRegion(region)
+    }
+
+    /** Grows [region]'s radius by [FLOOR_REGION_GROWTH_FRACTION] of [HeightMap.width] and
+     * re-carves the full circle centered at the map's true bottom (the same "genuinely
+     * embedded" collapse [CraterCarver] already applies for a deep-enough impact - see its own
+     * doc), clamped to [FloorRegion.depthCapGroundY] for Lava or the map's own bottom for Void.
+     * Pushes a fresh [ImpactEffect] at the new size so the renderer's existing explosion grow/
+     * hold/fade animation plays exactly as if a real blast had just gone off there - literally
+     * reusing that animation rather than inventing a new one. */
+    private fun growRegion(region: FloorRegion) {
+        region.radius += FLOOR_REGION_GROWTH_FRACTION * terrain.width
+        val maxGroundY = region.depthCapGroundY ?: terrain.height
+        CraterCarver.carve(terrain, region.centerX.toInt(), terrain.height, region.radius.toInt(), maxGroundY)
+        activeImpactEffects += ImpactEffect(region.centerX, terrain.height.toFloat(), region.radius)
+    }
+
+    /** Fires once every completed round (see [finishResolution]) for whichever mechanic
+     * [floorType] actually has - a no-op for every other floor type. */
+    private fun processFloorRound() {
+        when (floorType) {
+            FloorType.VOID -> activeVoidRegions.forEach { growRegion(it) }
+            FloorType.LAVA -> {
+                activeLavaRegions.forEach { growRegion(it) }
+                applyLavaRoundDamage()
+            }
+            FloorType.WATER -> {
+                raiseWaterLevel()
+                applyDrowningCheck()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun raiseWaterLevel() {
+        currentWaterLevelY = (currentWaterLevelY - WATER_RISE_FRACTION * terrain.height).coerceAtLeast(0f)
+    }
+
+    /** Any alive tank fully submerged - even its topmost point at or below the water's own
+     * surface - dies at the round boundary via the ordinary [kill] path (full burn/explosion/
+     * ash sequence; water drowning is not one of the instant, animation-skipping fall-through
+     * deaths [killByFallingThroughFloor] handles for Hole/Wrap/Void). */
+    private fun applyDrowningCheck() {
+        for (tank in tanks) {
+            if (!tank.alive) continue
+            if (tank.y - Tank.RADIUS >= currentWaterLevelY) {
+                kill(tank)
+            }
+        }
+    }
+
+    /** A tank resting (not [Tank.falling]) on a column horizontally within a lava region's own
+     * radius counts as touching it - [LAVA_TOUCH_DAMAGE_FRACTION] of max health, and this
+     * always overrides (never stacks with) the proximity burn below for the same tank in the
+     * same round. Otherwise, a tank within [LAVA_PROXIMITY_HORIZONTAL_FRACTION] of
+     * [HeightMap.width] horizontally and [LAVA_PROXIMITY_VERTICAL_FRACTION] of
+     * [HeightMap.height] vertically of a lava region's own surface takes
+     * [LAVA_PROXIMITY_DAMAGE_FRACTION] of max health in burning damage. */
+    private fun applyLavaRoundDamage() {
+        for (tank in tanks) {
+            if (!tank.alive) continue
+            val touching = activeLavaRegions.any { region -> !tank.falling && abs(tank.x - region.centerX) <= region.radius }
+            if (touching) {
+                applyLavaDamage(tank, LAVA_TOUCH_DAMAGE_FRACTION)
+                continue
+            }
+            val nearby = activeLavaRegions.any { region ->
+                val horizontalGap = abs(tank.x - region.centerX) - region.radius
+                val verticalGap = abs(tank.y - terrain.heightAt(region.centerX.toInt()).toFloat())
+                horizontalGap in 0f..(LAVA_PROXIMITY_HORIZONTAL_FRACTION * terrain.width) &&
+                    verticalGap <= LAVA_PROXIMITY_VERTICAL_FRACTION * terrain.height
+            }
+            if (nearby) {
+                applyLavaDamage(tank, LAVA_PROXIMITY_DAMAGE_FRACTION)
+            }
+        }
+    }
+
+    private fun applyLavaDamage(tank: Tank, fraction: Float) {
+        tank.health = (tank.health - DamageCalculator.percentOfMaxHealth(fraction)).coerceAtLeast(0)
+        if (tank.health == 0) kill(tank)
+    }
+
+    /** [FloorType.HOLE]/[FloorType.WRAP]/[FloorType.VOID] only: a tank that settles onto a
+     * fully-open column (see [applyTankGravity]) dies instantly, with none of the ordinary
+     * burn/explosion/ash sequence - there's no ground left for one to play out on. The only
+     * remaining trace is its usual random death-taunt speech bubble (see
+     * [com.scorchedphoto.app.game.GameRenderer]'s reuse of the same taunt-assignment cache a
+     * burning tank's bubble already uses), anchored at [Tank.fallThroughAnchorY] - the fixed
+     * point it fell through, not wherever it might otherwise have kept falling to. */
+    private fun killByFallingThroughFloor(tank: Tank) {
+        tank.alive = false
+        killedThisResolution += tank.id
+        tank.fallingThroughFloor = true
+        tank.fallThroughElapsed = 0f
+        tank.fallThroughAnchorY = terrain.height.toFloat()
+        tank.falling = false
+        tank.fallVelocity = 0f
+    }
+
+    /** Clears [Tank.fallingThroughFloor] (and with it, its death-taunt speech bubble) once
+     * [FALL_THROUGH_BUBBLE_SECONDS] has elapsed since [killByFallingThroughFloor] - see [tick]'s
+     * `deathAnimationsDone`, which waits for this the same way it waits for an ordinary death's
+     * burn/explosion/ash sequence. */
+    private fun updateFallingThroughFloor(dt: Float) {
+        for (tank in tanks) {
+            if (!tank.fallingThroughFloor) continue
+            tank.fallThroughElapsed += dt
+            if (tank.fallThroughElapsed >= FALL_THROUGH_BUBBLE_SECONDS) {
+                tank.fallingThroughFloor = false
+            }
+        }
+    }
+
     private fun splitMirv(parent: Projectile): List<Projectile> {
         val weapon = parent.weapon
         val childWeapon = weapon.copy(childCount = 1, childSpreadDegrees = 0f)
@@ -402,6 +639,10 @@ class GameEngine(
 
     private fun applyTankGravity(dt: Float) {
         for (tank in tanks) {
+            // Already fallen through and gone (see killByFallingThroughFloor) - no longer
+            // participates in gravity/settling at all, only its death-taunt bubble timer
+            // (updateFallingThroughFloor) still runs.
+            if (tank.fallingThroughFloor) continue
             // A tank that just died keeps falling until it actually lands - skipping
             // gravity for it the instant it dies (like every other dead tank) would leave
             // it frozen hovering wherever the killing blow found it, even when the blast
@@ -416,6 +657,12 @@ class GameEngine(
                 tank.falling = true
                 tank.fallVelocity += GRAVITY * dt
                 tank.y = min(tank.y + tank.fallVelocity * dt, surfaceY)
+            } else if (tank.alive && surfaceY >= terrain.height && floorType in FALL_THROUGH_FLOOR_TYPES) {
+                // The column it's settling onto has no floor left at all - under Hole/Wrap/
+                // Void, that's a fatal fall through the map, not a landing. Ash piles are
+                // excluded (already dead - already-alive-false is covered by the tank.alive
+                // check itself, since only a still-alive tank can be freshly killed this way).
+                killByFallingThroughFloor(tank)
             } else {
                 // Ash has no health left to lose, so a fall never damages/re-kills it -
                 // only a still-alive-or-dying tank's fall does.
@@ -530,6 +777,16 @@ class GameEngine(
     }
 
     private fun finishResolution() {
+        // A round (see processFloorRound) is checked for and processed *before* the win check,
+        // not after - so a Water/Lava round that eliminates the last standing side can end the
+        // match on this same turn, instead of leaving it stalled one turn behind.
+        turnsCompletedThisRound++
+        if (turnsCompletedThisRound >= tanksAliveAtRoundStart) {
+            processFloorRound()
+            turnsCompletedThisRound = 0
+            tanksAliveAtRoundStart = tanks.count { it.alive }
+        }
+
         val result = turnManager.checkWinCondition() ?: mutualEliminationTie()
         if (result != null) {
             winResult = result
@@ -576,5 +833,32 @@ class GameEngine(
         // Explosion animation: 0.125s growth + 0.25s hold + 0.25s fade = 0.625s total
         private const val IMPACT_EFFECT_LIFETIME_SECONDS = 0.625f
         private const val BOUNCE_EFFECT_LIFETIME_SECONDS = 0.25f
+
+        // Reuses TANK_BURNING_DURATION_SECONDS's value for a consistent taunt-display length,
+        // kept as its own named constant since it's conceptually a different thing (a
+        // fall-through death has no burn animation at all - see killByFallingThroughFloor).
+        private const val FALL_THROUGH_BUBBLE_SECONDS = TANK_BURNING_DURATION_SECONDS
+
+        private val FALL_THROUGH_FLOOR_TYPES = setOf(FloorType.HOLE, FloorType.WRAP, FloorType.VOID)
+
+        // Void/Lava's own per-round radial spread (see GameEngine.growRegion) - 2% of
+        // terrain.width per round, per the horizontal-percentages-use-width decision.
+        private const val FLOOR_REGION_GROWTH_FRACTION = 0.02f
+
+        // Water's per-round rise (see raiseWaterLevel) - 2% of terrain.height per round, per
+        // the vertical-percentages-use-height decision.
+        private const val WATER_RISE_FRACTION = 0.02f
+
+        // Lava's own regrowth never carves deeper than this fraction of terrain.height below
+        // wherever its region was first seeded (see maybeSeedFloorRegion) - ordinary gunfire on
+        // a Lava floor is unaffected, see floorMaxGroundY's own doc.
+        private const val LAVA_DEPTH_CAP_FRACTION = 0.04f
+
+        // Lava round damage (see applyLavaRoundDamage) - touching always overrides (never
+        // stacks with) the proximity burn for the same tank in the same round.
+        private const val LAVA_TOUCH_DAMAGE_FRACTION = 0.25f
+        private const val LAVA_PROXIMITY_DAMAGE_FRACTION = 0.10f
+        private const val LAVA_PROXIMITY_HORIZONTAL_FRACTION = 0.05f
+        private const val LAVA_PROXIMITY_VERTICAL_FRACTION = 0.02f
     }
 }

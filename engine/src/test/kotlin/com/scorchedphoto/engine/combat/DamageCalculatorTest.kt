@@ -88,4 +88,12 @@ class DamageCalculatorTest {
         val damage = DamageCalculator.computeDamage(weapon, impactX = 100f, impactY = 100f, tank = tank)
         assertEquals(0, damage)
     }
+
+    @Test
+    fun `percentOfMaxHealth returns a flat fraction of Tank MAX_HEALTH, not any tank's current health`() {
+        assertEquals(25, DamageCalculator.percentOfMaxHealth(0.25f))
+        assertEquals(10, DamageCalculator.percentOfMaxHealth(0.10f))
+        assertEquals(Tank.MAX_HEALTH, DamageCalculator.percentOfMaxHealth(1f))
+        assertEquals(0, DamageCalculator.percentOfMaxHealth(0f))
+    }
 }

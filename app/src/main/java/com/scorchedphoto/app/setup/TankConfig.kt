@@ -1,6 +1,7 @@
 package com.scorchedphoto.app.setup
 
 import com.scorchedphoto.engine.EdgeType
+import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 
@@ -20,6 +21,7 @@ data class MatchConfig(
     val tankConfigs: List<TankConfig>,
     val wallType: EdgeType = EdgeType.NONE,
     val ceilingType: EdgeType = EdgeType.NONE,
+    val floorType: FloorType = FloorType.GROUND,
 )
 
 val TANK_COLOR_PALETTE: List<Int> = listOf(

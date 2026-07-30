@@ -7,6 +7,7 @@ import com.scorchedphoto.app.tts.CustomVoiceRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
 import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.EdgeType
+import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -53,6 +54,12 @@ class GameSetupViewModel @Inject constructor(
 
     private val _ceilingType = MutableStateFlow<EdgeType?>(EdgeType.NONE)
     val ceilingType: StateFlow<EdgeType?> = _ceilingType.asStateFlow()
+
+    // Same "Random" sentinel pattern as _wallType/_ceilingType above, but floors have no NONE
+    // value (see FloorType's own doc - the floor is never simply "absent") so this defaults to
+    // FloorType.GROUND, today's only floor behavior, instead.
+    private val _floorType = MutableStateFlow<FloorType?>(FloorType.GROUND)
+    val floorType: StateFlow<FloorType?> = _floorType.asStateFlow()
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
@@ -142,13 +149,19 @@ class GameSetupViewModel @Inject constructor(
         _ceilingType.value = type
     }
 
-    /** Resolves "Random" (a null wallType/ceilingType) to one concrete EdgeType per side, each
-     * independently, right before the match starts - see _wallType's doc for why this is the
-     * one place that needs to happen. */
+    fun setFloorType(type: FloorType?) {
+        _floorType.value = type
+    }
+
+    /** Resolves "Random" (a null wallType/ceilingType/floorType) to one concrete type per side,
+     * each independently, right before the match starts - see _wallType's doc for why this is
+     * the one place that needs to happen. */
     fun commitAndStart() {
         val resolvedWallType = _wallType.value ?: EdgeType.entries.random()
         val resolvedCeilingType = _ceilingType.value ?: EdgeType.entries.random()
-        matchConfigRepository.matchConfig = MatchConfig(_tankConfigs.value, resolvedWallType, resolvedCeilingType)
+        val resolvedFloorType = _floorType.value ?: FloorType.entries.random()
+        matchConfigRepository.matchConfig =
+            MatchConfig(_tankConfigs.value, resolvedWallType, resolvedCeilingType, resolvedFloorType)
     }
 
     private fun updateAt(index: Int, transform: (TankConfig) -> TankConfig) {

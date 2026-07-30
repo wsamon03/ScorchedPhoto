@@ -13,11 +13,13 @@ import android.graphics.RectF
 import android.graphics.Shader
 import com.scorchedphoto.engine.BounceEffect
 import com.scorchedphoto.engine.EdgeType
+import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ImpactEffect
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.TankShape
+import com.scorchedphoto.engine.terrain.FloorRegion
 import com.scorchedphoto.terrain.HeightMap
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -53,6 +55,7 @@ class GameRenderer(
     private val deathPhrases: List<String>,
     private val wallType: EdgeType = EdgeType.NONE,
     private val ceilingType: EdgeType = EdgeType.NONE,
+    private val floorType: FloorType = FloorType.GROUND,
     private val onBurnMessageAssigned: (tankId: Int, spokenText: String) -> Unit = { _, _ -> },
 ) {
 
@@ -91,6 +94,17 @@ class GameRenderer(
         textSize = 24f
         textAlign = Paint.Align.CENTER
     }
+    private val regionFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val lavaSpeckPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+    private val waterFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val waterWavePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+    private val lavaBumpPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+    }
 
     // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is found.
     private val debugTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -123,6 +137,20 @@ class GameRenderer(
     // wall/ceiling bounce effect.
     private val edgeMarkRect = RectF()
     private val edgeMarkPath = Path()
+
+    // Reused every call rather than allocated fresh - see drawRegionFill (Void/Lava, called
+    // once per tracked region whenever the terrain layer redraws) and drawWaterOverlay/
+    // drawLavaBumps (called every frame while their floor type is active).
+    private val regionFillPath = Path()
+    private val waterFillPath = Path()
+    private val waveStrokePath = Path()
+
+    // Each Lava FloorRegion's speck layout ("specks of black" - see FloorType's doc), keyed
+    // by the region's own centerX (stable for the region's whole lifetime, unlike its
+    // ever-growing radius) and generated once, deterministically, so the speckle pattern
+    // doesn't flicker by being re-randomized on every redraw - see lavaSpecksFor. Mirrors
+    // the ashSpecks/tankBodyPaths caching pattern above.
+    private val lavaSpecks = mutableMapOf<Float, List<LavaSpeck>>()
 
     // Each tank's body Path, created once per tank id and reused every frame (rebuilt via
     // .reset() since a tank's cx/cy/slope-rotation genuinely can change frame to frame) -
@@ -174,6 +202,12 @@ class GameRenderer(
     private val wallWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 4242) }
     private val ceilingWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 9191) }
 
+    // Same wall-clock-based animation baseline as wrapEffectsStartNanos above, but shared by
+    // FloorType.WATER's rising wavy border and FloorType.LAVA's small surface waves/bumps (see
+    // drawWaterOverlay/drawLavaBumps) - kept separate from wrapEffectsStartNanos since it's
+    // conceptually a different set of animations, even though the underlying pattern is the same.
+    private val floorEffectsStartNanos = System.nanoTime()
+
     // The cached static-layer bitmap/canvas (tank bodies/barrels, ash piles, drawn on top of
     // the terrain layer below) plus the WorldTransform it was drawn with - recreated only when
     // the real canvas's size changes (WorldTransform depends solely on canvas size and terrain
@@ -218,6 +252,9 @@ class GameRenderer(
         phase: MatchPhase,
         firingTankId: Int? = null,
         firingMessage: String? = null,
+        waterLevelY: Float = terrain.height.toFloat(),
+        voidRegions: List<FloorRegion> = emptyList(),
+        lavaRegions: List<FloorRegion> = emptyList(),
         tickMs: Float = 0f,
         soundMs: Float = 0f,
         lockMs: Float = 0f,
@@ -226,13 +263,15 @@ class GameRenderer(
         ensureStaticLayer(canvas.width, canvas.height, terrain)
         val transform = cachedTransform!!
 
-        // The terrain layer (photo, crater scars, horizon line) only needs redrawing when it
-        // resized (ensureStaticLayer already set terrainLayerDirty for that) or the terrain
-        // itself actually changed (a crater carved during RESOLVING) - never merely because the
-        // match phase changed, unlike the tank layer below. When it does redraw, the tank layer
-        // must too, since it's drawn on top of the terrain layer's own bitmap.
+        // The terrain layer (photo, crater scars, horizon line, Void/Lava fills) only needs
+        // redrawing when it resized (ensureStaticLayer already set terrainLayerDirty for that)
+        // or the terrain itself actually changed (a crater carved during RESOLVING, including a
+        // Void/Lava region's own per-round growth - see GameEngine.growRegion, which carves
+        // through the same CraterCarver.carve that bumps HeightMap.version) - never merely
+        // because the match phase changed, unlike the tank layer below. When it does redraw, the
+        // tank layer must too, since it's drawn on top of the terrain layer's own bitmap.
         if (terrainLayerDirty || terrain.version != cachedTerrainVersion) {
-            redrawTerrainLayer(terrain, transform)
+            redrawTerrainLayer(terrain, transform, voidRegions, lavaRegions)
             terrainLayerDirty = false
             cachedTerrainVersion = terrain.version
             staticLayerDirty = true
@@ -265,7 +304,19 @@ class GameRenderer(
         }
         canvas.drawBitmap(staticLayerBitmap!!, 0f, 0f, null)
 
-        drawDynamicOverlay(canvas, tanks, projectiles, impactEffects, bounceEffects, transform, firingTankId, firingMessage)
+        drawDynamicOverlay(
+            canvas,
+            terrain,
+            tanks,
+            projectiles,
+            impactEffects,
+            bounceEffects,
+            transform,
+            firingTankId,
+            firingMessage,
+            waterLevelY,
+            lavaRegions,
+        )
 
         // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is
         // found. Anchored to the bottom-left (canvas.height upward) rather than a fixed
@@ -307,7 +358,7 @@ class GameRenderer(
      * jagged segmented terrain the anti-aliased horizon/crater stroke work here is expensive
      * enough on this software `Canvas` to cause real, measured multi-hundred-millisecond frame
      * stalls repeated every single frame. */
-    private fun redrawTerrainLayer(terrain: HeightMap, transform: WorldTransform) {
+    private fun redrawTerrainLayer(terrain: HeightMap, transform: WorldTransform, voidRegions: List<FloorRegion>, lavaRegions: List<FloorRegion>) {
         val terrainCanvas = terrainLayerCanvas ?: return
         terrainCanvas.drawColor(Color.BLACK)
 
@@ -323,17 +374,108 @@ class GameRenderer(
 
         drawCraterScars(terrainCanvas, terrain, transform)
         drawHorizonLine(terrainCanvas, terrain, transform)
+        drawVoidFill(terrainCanvas, terrain, transform, voidRegions)
+        drawLavaFill(terrainCanvas, terrain, transform, lavaRegions)
         drawEdgeBorders(terrainCanvas)
     }
 
-    /** A fixed-color border along the screen edges the current [wallType] (left/right) and
-     * [ceilingType] (top) actually bounce off of - drawn in screen space (not scaled by
-     * [WorldTransform], unlike everything else in this layer) since it's a HUD-like frame
-     * around the play area, not a feature of the world itself. [EdgeType.NONE] draws no
-     * border for that edge; [EdgeType.WRAP]'s "opposite edge" bounce and [EdgeType.BLAST_STEEL]'s
-     * detonate-on-touch both still get a color/border like every other real bounce type -
-     * "Random" never reaches here at all, already resolved to one concrete [EdgeType] before
-     * a match starts (see [com.scorchedphoto.app.setup.GameSetupViewModel.commitAndStart]).
+    /** [FloorType.VOID]'s own solid-black fill, covering exactly the columns this region has
+     * actually carved open (`terrain.groundY[x] > originalGroundY[x]`, scoped to the region's
+     * own horizontal span) from the carved surface down to the map's true bottom - never any
+     * ordinary battle crater that merely hasn't reached bottom yet, since only tracked
+     * [FloorRegion]s reach this call at all (see [GameEngine.voidRegions][com.scorchedphoto.engine.GameEngine.voidRegions]). */
+    private fun drawVoidFill(canvas: Canvas, terrain: HeightMap, transform: WorldTransform, regions: List<FloorRegion>) {
+        if (regions.isEmpty()) return
+        regionFillPaint.shader = null
+        regionFillPaint.color = colorFor(FloorType.VOID)!!
+        for (region in regions) {
+            drawRegionFill(canvas, terrain, transform, region, regionFillPaint)
+        }
+    }
+
+    /** [FloorType.LAVA]'s own red fill (same carved-columns scoping as [drawVoidFill]), plus a
+     * scatter of black flecks per the user's "specks of black" spec - see [lavaSpecksFor]. The
+     * small waves/bumps along the lava's own surface are animated, so those are drawn separately
+     * every frame as part of the dynamic overlay - see [drawLavaBumps]. */
+    private fun drawLavaFill(canvas: Canvas, terrain: HeightMap, transform: WorldTransform, regions: List<FloorRegion>) {
+        if (regions.isEmpty()) return
+        regionFillPaint.shader = null
+        regionFillPaint.color = colorFor(FloorType.LAVA)!!
+        for (region in regions) {
+            drawRegionFill(canvas, terrain, transform, region, regionFillPaint)
+            val (minX, maxX) = regionColumnSpan(terrain, region) ?: continue
+            val bottomY = transform.screenY(terrain.height.toFloat())
+            for (speck in lavaSpecksFor(region)) {
+                val x = minX + speck.alongFraction * (maxX - minX)
+                val topY = transform.screenY(terrain.groundY[x.toInt().coerceIn(minX, maxX)].toFloat())
+                if (topY >= bottomY) continue
+                val sx = transform.screenX(x)
+                val sy = topY + speck.depthFraction * (bottomY - topY)
+                lavaSpeckPaint.alpha = 255
+                canvas.drawCircle(sx, sy, speck.radius * transform.scale, lavaSpeckPaint)
+            }
+        }
+    }
+
+    /** This Lava region's speck layout - generated once (deterministically, from the region's
+     * own [FloorRegion.centerX], stable for its whole lifetime) and cached, so specks don't
+     * flicker by being re-randomized whenever the terrain layer redraws (every round, at least,
+     * as the region keeps growing). */
+    private fun lavaSpecksFor(region: FloorRegion): List<LavaSpeck> = lavaSpecks.getOrPut(region.centerX) {
+        val rng = kotlin.random.Random(region.centerX.toRawBits())
+        (0 until LAVA_SPECK_COUNT).map {
+            LavaSpeck(
+                alongFraction = rng.nextFloat(),
+                depthFraction = rng.nextFloat(),
+                radius = 1f + rng.nextFloat() * 1.5f,
+            )
+        }
+    }
+
+    /** [region]'s own column span, clamped to the terrain's actual bounds - `null` if the
+     * region sits entirely outside them (shouldn't normally happen, but a region's centerX is
+     * never re-clamped after seeding). Shared by [drawRegionFill] and [drawLavaFill]'s speck
+     * placement so both agree on exactly which columns a region covers. */
+    private fun regionColumnSpan(terrain: HeightMap, region: FloorRegion): Pair<Int, Int>? {
+        val minX = (region.centerX - region.radius).toInt().coerceIn(0, terrain.width - 1)
+        val maxX = (region.centerX + region.radius).toInt().coerceIn(0, terrain.width - 1)
+        return if (minX > maxX) null else minX to maxX
+    }
+
+    /** Fills the area this [region] has actually carved open - from its own per-column carved
+     * surface (`terrain.groundY[x]`, already lowered by [GameEngine.growRegion][com.scorchedphoto.engine.GameEngine.growRegion])
+     * down to the map's true bottom - with [paint]. Shared by [drawVoidFill]/[drawLavaFill];
+     * only the color (and, for Lava, the speck scatter drawn on top) differs between the two. */
+    private fun drawRegionFill(canvas: Canvas, terrain: HeightMap, transform: WorldTransform, region: FloorRegion, paint: Paint) {
+        val (minX, maxX) = regionColumnSpan(terrain, region) ?: return
+        regionFillPath.reset()
+        var started = false
+        for (x in minX..maxX) {
+            val px = transform.screenX(x.toFloat())
+            val py = transform.screenY(terrain.groundY[x].toFloat())
+            if (!started) {
+                regionFillPath.moveTo(px, py)
+                started = true
+            } else {
+                regionFillPath.lineTo(px, py)
+            }
+        }
+        if (!started) return
+        val bottomY = transform.screenY(terrain.height.toFloat())
+        regionFillPath.lineTo(transform.screenX(maxX.toFloat()), bottomY)
+        regionFillPath.lineTo(transform.screenX(minX.toFloat()), bottomY)
+        regionFillPath.close()
+        canvas.drawPath(regionFillPath, paint)
+    }
+
+    /** A fixed-color border along the screen edges the current [wallType] (left/right),
+     * [ceilingType] (top), and [floorType] (bottom) actually bounce off of - drawn in screen
+     * space (not scaled by [WorldTransform], unlike everything else in this layer) since it's a
+     * HUD-like frame around the play area, not a feature of the world itself. [EdgeType.NONE]/
+     * [FloorType.HOLE] draw no border for that edge; every other real bounce type still gets a
+     * color/border, including the ones that also detonate/fizzle rather than bounce on touch -
+     * "Random" never reaches here at all, already resolved to one concrete type before a match
+     * starts (see [com.scorchedphoto.app.setup.GameSetupViewModel.commitAndStart]).
      */
     private fun drawEdgeBorders(canvas: Canvas) {
         val width = canvas.width.toFloat()
@@ -350,13 +492,23 @@ class GameRenderer(
             edgeBorderPaint.color = color
             canvas.drawRect(0f, 0f, width, thickness, edgeBorderPaint)
         }
+        colorFor(floorType)?.let { color ->
+            edgeBorderPaint.color = color
+            canvas.drawRect(0f, height - thickness, width, height, edgeBorderPaint)
+        }
     }
 
     /** Screen-edge border thickness, shared by [drawEdgeBorders] and [drawWrapEffects] so the
      * glow/sparkles line up exactly against the solid border they extend from. */
-    private fun borderThickness(canvas: Canvas): Float {
-        val width = canvas.width.toFloat()
-        val height = canvas.height.toFloat()
+    private fun borderThickness(canvas: Canvas): Float = edgeBorderThicknessPx(canvas.width.toFloat(), canvas.height.toFloat())
+
+    /** Public wrapper around [borderThickness]'s own thickness math, taking explicit
+     * dimensions rather than a [Canvas] - lets [GameLoopThread] compute the exact same
+     * screen-space border thickness (to know where "just below the top border" actually
+     * lands for [com.scorchedphoto.engine.GameEngine.ceilingWrapDepthY]/
+     * [com.scorchedphoto.engine.GameEngine.floorWrapDepthY]) without duplicating
+     * [EDGE_BORDER_THICKNESS_FRACTION] or holding a real [Canvas] of its own. */
+    fun edgeBorderThicknessPx(width: Float, height: Float): Float {
         if (width <= 0f || height <= 0f) return 0f
         return (min(width, height) * EDGE_BORDER_THICKNESS_FRACTION).coerceAtLeast(1f)
     }
@@ -485,6 +637,11 @@ class GameRenderer(
         }
 
         for (tank in tanks) {
+            // Fell through a Hole/Wrap/Void floor - no body, no ash pile, ever again (see
+            // GameEngine.killByFallingThroughFloor's doc): the only remaining trace is its
+            // death-taunt speech bubble, drawn separately every frame - see
+            // drawFallThroughSpeechBubble.
+            if (tank.fallingThroughFloor) continue
             if (tank.isAsh) {
                 drawAshPile(staticCanvas, tank, transform)
                 continue
@@ -500,6 +657,7 @@ class GameRenderer(
      * and the pre-fire speech bubble. */
     private fun drawDynamicOverlay(
         canvas: Canvas,
+        terrain: HeightMap,
         tanks: List<Tank>,
         projectiles: List<Projectile>,
         impactEffects: List<ImpactEffect>,
@@ -507,8 +665,12 @@ class GameRenderer(
         transform: WorldTransform,
         firingTankId: Int?,
         firingMessage: String?,
+        waterLevelY: Float,
+        lavaRegions: List<FloorRegion>,
     ) {
         drawWrapEffects(canvas)
+        drawWaterOverlay(canvas, transform, waterLevelY)
+        drawLavaBumps(canvas, terrain, transform, lavaRegions)
         drawImpactEffects(canvas, impactEffects, transform)
         drawBounceEffects(canvas, bounceEffects, transform)
 
@@ -522,12 +684,103 @@ class GameRenderer(
         }
 
         for (tank in tanks) {
-            if (tank.burning) {
+            if (tank.fallingThroughFloor) {
+                drawFallThroughSpeechBubble(canvas, tank, transform)
+            } else if (tank.burning) {
                 drawBurningTank(canvas, tank, transform)
             } else if (tank.id == firingTankId && firingMessage != null) {
                 drawFiringSpeechBubble(canvas, tank, transform, firingMessage)
             }
         }
+    }
+
+    /** [FloorType.WATER]'s rising, wavy-bordered fill - a no-op for every other floor type
+     * ([waterLevelY] stays pinned at [HeightMap.height], keeping [screenLevelY] at the very
+     * bottom edge, but this still short-circuits explicitly rather than relying on that being
+     * invisible). Animated continuously (wall-clock based, like [drawWrapEffects]) since the
+     * wave itself moves even between rounds, when the water's actual level isn't rising. */
+    private fun drawWaterOverlay(canvas: Canvas, transform: WorldTransform, waterLevelY: Float) {
+        if (floorType != FloorType.WATER) return
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+        val screenLevelY = transform.screenY(waterLevelY)
+        if (screenLevelY >= height) return
+
+        val elapsedSeconds = (System.nanoTime() - floorEffectsStartNanos) / 1_000_000_000f
+        val amplitude = WATER_WAVE_AMPLITUDE * transform.scale
+        val wavelength = WATER_WAVE_LENGTH_PX * transform.scale
+
+        waterFillPath.reset()
+        waterFillPath.moveTo(0f, height)
+        waterFillPath.lineTo(0f, waveY(0f, screenLevelY, amplitude, wavelength, elapsedSeconds))
+        waveStrokePath.reset()
+        waveStrokePath.moveTo(0f, waveY(0f, screenLevelY, amplitude, wavelength, elapsedSeconds))
+        var x = 0f
+        while (x <= width) {
+            val y = waveY(x, screenLevelY, amplitude, wavelength, elapsedSeconds)
+            waterFillPath.lineTo(x, y)
+            waveStrokePath.lineTo(x, y)
+            x += WAVE_STEP_PX
+        }
+        waterFillPath.lineTo(width, height)
+        waterFillPath.close()
+
+        val waterColor = colorFor(FloorType.WATER)!!
+        waterFillPaint.color = Color.argb(WATER_FILL_ALPHA, Color.red(waterColor), Color.green(waterColor), Color.blue(waterColor))
+        canvas.drawPath(waterFillPath, waterFillPaint)
+        waterWavePaint.color = waterColor
+        canvas.drawPath(waveStrokePath, waterWavePaint)
+    }
+
+    /** [FloorType.LAVA]'s "very small waves/bumps" - the same wavy-stroke idea as
+     * [drawWaterOverlay], but traced along each tracked [FloorRegion]'s own carved surface
+     * (not a single flat level) and with a much smaller amplitude, since these are meant to
+     * read as surface bubbling rather than a rising tide. */
+    private fun drawLavaBumps(canvas: Canvas, terrain: HeightMap, transform: WorldTransform, regions: List<FloorRegion>) {
+        if (regions.isEmpty()) return
+        val elapsedSeconds = (System.nanoTime() - floorEffectsStartNanos) / 1_000_000_000f
+        val amplitude = LAVA_BUMP_AMPLITUDE * transform.scale
+        val wavelength = LAVA_BUMP_LENGTH_PX * transform.scale
+        lavaBumpPaint.color = colorFor(FloorType.LAVA)!!
+
+        for (region in regions) {
+            val (minX, maxX) = regionColumnSpan(terrain, region) ?: continue
+            waveStrokePath.reset()
+            var started = false
+            for (x in minX..maxX) {
+                val baseY = transform.screenY(terrain.groundY[x].toFloat())
+                val y = waveY(transform.screenX(x.toFloat()), baseY, amplitude, wavelength, elapsedSeconds)
+                val px = transform.screenX(x.toFloat())
+                if (!started) {
+                    waveStrokePath.moveTo(px, y)
+                    started = true
+                } else {
+                    waveStrokePath.lineTo(px, y)
+                }
+            }
+            if (started) canvas.drawPath(waveStrokePath, lavaBumpPaint)
+        }
+    }
+
+    /** A single point on a sine wave through ([baseX], [baseLevelY]) - shared by
+     * [drawWaterOverlay] (a flat, screen-wide level) and [drawLavaBumps] (traced along a
+     * region's own already-uneven carved surface, so each column's [baseLevelY] differs). */
+    private fun waveY(baseX: Float, baseLevelY: Float, amplitude: Float, wavelength: Float, elapsedSeconds: Float): Float =
+        baseLevelY + sin(baseX / wavelength + elapsedSeconds * WAVE_SPEED) * amplitude
+
+    /** [FloorType.HOLE]/[FloorType.WRAP]/[FloorType.VOID]'s instant, animation-free death (see
+     * [Tank.fallingThroughFloor]'s doc) - the tank's body is never drawn again once this is
+     * true (see [redrawStaticLayer]), so its usual random death-taunt speech bubble is the only
+     * remaining trace, anchored at the fixed point it fell through ([Tank.fallThroughAnchorY],
+     * not [Tank.y], which the tank no longer needs to keep animating) rather than following it -
+     * reuses the exact same taunt-assignment/TTS plumbing ([burnMessageFor]) a normal burning
+     * death's bubble already uses, just anchored differently. */
+    private fun drawFallThroughSpeechBubble(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val message = burnMessageFor(tank) ?: return
+        val cx = transform.screenX(tank.x)
+        val cy = transform.screenY(tank.fallThroughAnchorY)
+        drawSpeechBubble(canvas, cx, cy, message)
     }
 
     /**
@@ -889,6 +1142,12 @@ class GameRenderer(
      * ([nx] in [-1, 1]) and height ([ny] in [-1, 0], 0 = the pile's base). */
     private data class AshSpeck(val nx: Float, val ny: Float, val isBlack: Boolean)
 
+    /** One black fleck's position within a Lava region's own fill area, normalized to the
+     * region's horizontal span ([alongFraction] in `[0, 1]`, left to right) and vertical
+     * span from the region's carved surface down to the map's true bottom ([depthFraction]
+     * in `[0, 1]`) - see [drawLavaFill]. */
+    private data class LavaSpeck(val alongFraction: Float, val depthFraction: Float, val radius: Float)
+
     private fun drawSpeechBubble(canvas: Canvas, cx: Float, tailTipY: Float, message: String) {
         speechBubbleTextPaint.getFontMetrics(speechBubbleFontMetrics)
         val fm = speechBubbleFontMetrics
@@ -957,6 +1216,21 @@ class GameRenderer(
         private const val WRAP_SPARKLE_MAX_ALPHA = 230
         private const val PROJECTILE_RADIUS = 5f
         private const val BARREL_STROKE_WIDTH = 1.25f
+
+        // FloorType.WATER's wavy rising border/fill and FloorType.LAVA's small surface bumps -
+        // see drawWaterOverlay/drawLavaBumps, both built on the same waveY sine helper. Water's
+        // amplitude/wavelength are large enough to read as a real wave; Lava's are deliberately
+        // much smaller ("very small waves/bumps" per the user's own spec) so it reads as gentle
+        // surface bubbling rather than a tide. WAVE_STEP_PX is screen-space (how finely the wave
+        // path is sampled), shared by both since neither needs a finer step than the other.
+        private const val WATER_WAVE_AMPLITUDE = 4f
+        private const val WATER_WAVE_LENGTH_PX = 40f
+        private const val WATER_FILL_ALPHA = 130
+        private const val LAVA_BUMP_AMPLITUDE = 1.2f
+        private const val LAVA_BUMP_LENGTH_PX = 18f
+        private const val WAVE_SPEED = 2f
+        private const val WAVE_STEP_PX = 6f
+        private const val LAVA_SPECK_COUNT = 14
 
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of

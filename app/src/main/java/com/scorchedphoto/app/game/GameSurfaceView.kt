@@ -37,6 +37,7 @@ class GameSurfaceView(
         deathPhrases = deathPhrases,
         wallType = engine.wallType,
         ceilingType = engine.ceilingType,
+        floorType = engine.floorType,
         onBurnMessageAssigned = onBurnMessageAssigned,
     )
     private var loopThread: GameLoopThread? = null

@@ -123,6 +123,9 @@ class GameLoopThread(
                         engine.phase,
                         pendingSpeechTankId,
                         pendingSpeechText,
+                        engine.waterLevelY,
+                        engine.voidRegions,
+                        engine.lavaRegions,
                         tickMs,
                         soundMs,
                         lockMs,
@@ -138,6 +141,10 @@ class GameLoopThread(
                     // every frame after a resize.
                     val transform = renderer.currentTransform
                     engine.ceilingWrapDepthY = (canvas.height - transform.offsetY) / transform.scale
+                    // Mirrors ceilingWrapDepthY above, but "just below the top border" instead
+                    // of "near the map's true bottom" - see GameEngine.floorWrapDepthY's doc.
+                    val floorBorderThickness = renderer.edgeBorderThicknessPx(canvas.width.toFloat(), canvas.height.toFloat())
+                    engine.floorWrapDepthY = (floorBorderThickness - transform.offsetY) / transform.scale
                 } finally {
                     surfaceHolder.unlockCanvasAndPost(canvas)
                 }

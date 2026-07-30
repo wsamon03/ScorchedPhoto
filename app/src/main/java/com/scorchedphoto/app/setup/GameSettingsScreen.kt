@@ -21,11 +21,13 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.scorchedphoto.app.game.colorFor
 import com.scorchedphoto.engine.EdgeType
+import com.scorchedphoto.engine.FloorType
 
 @Composable
 fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
     val wallType by viewModel.wallType.collectAsStateWithLifecycle()
     val ceilingType by viewModel.ceilingType.collectAsStateWithLifecycle()
+    val floorType by viewModel.floorType.collectAsStateWithLifecycle()
 
     Scaffold { padding ->
         Column(
@@ -37,10 +39,31 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
             Text("Match Settings", style = MaterialTheme.typography.headlineMedium)
 
             Text("Wall Type", modifier = Modifier.padding(top = 24.dp))
-            EdgeTypeDropdown(selected = wallType, onSelect = viewModel::setWallType)
+            TypeDropdown(
+                selected = wallType,
+                options = EdgeType.entries,
+                displayName = { it.displayName },
+                colorFor = { colorFor(it) },
+                onSelect = viewModel::setWallType,
+            )
 
             Text("Ceiling Type", modifier = Modifier.padding(top = 16.dp))
-            EdgeTypeDropdown(selected = ceilingType, onSelect = viewModel::setCeilingType)
+            TypeDropdown(
+                selected = ceilingType,
+                options = EdgeType.entries,
+                displayName = { it.displayName },
+                colorFor = { colorFor(it) },
+                onSelect = viewModel::setCeilingType,
+            )
+
+            Text("Floor Type", modifier = Modifier.padding(top = 16.dp))
+            TypeDropdown(
+                selected = floorType,
+                options = FloorType.entries,
+                displayName = { it.displayName },
+                colorFor = { colorFor(it) },
+                onSelect = viewModel::setFloorType,
+            )
 
             Button(onClick = onBack, modifier = Modifier.padding(top = 24.dp)) {
                 Text("Back")
@@ -49,21 +72,32 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
     }
 }
 
-/** [colorFor] returns an [android.graphics.Color] Int (ARGB) - [GameRenderer] draws directly
- * with that, but Compose's [Text] wants its own [androidx.compose.ui.graphics.Color] type, so
- * every option's text color here goes through this converter. [EdgeType.NONE] has no color
- * ([colorFor] returns null), and its dropdown text falls back to [Color.Unspecified] (the
- * theme's own default) rather than a hardcoded one. */
-private fun edgeTypeTextColor(edgeType: EdgeType): Color = colorFor(edgeType)?.let(::Color) ?: Color.Unspecified
+/** [colorFor] returns an [android.graphics.Color] Int (ARGB) - [com.scorchedphoto.app.game.GameRenderer]
+ * draws directly with that, but Compose's [Text] wants its own [androidx.compose.ui.graphics.Color]
+ * type, so every option's text color here goes through this converter. An option with no color
+ * ([colorFor] returns null - [EdgeType.NONE]/[FloorType.HOLE]) falls back to [Color.Unspecified]
+ * (the theme's own default) rather than a hardcoded one. */
+private fun <T> optionTextColor(option: T, colorFor: (T) -> Int?): Color = colorFor(option)?.let(::Color) ?: Color.Unspecified
 
+/** Generic dropdown shared by the wall/ceiling ([EdgeType]) and floor ([FloorType]) settings
+ * rows below - both are "pick one value, or Random" pickers whose option text is colored to
+ * match how that value actually renders in-game (see [colorFor]/[com.scorchedphoto.app.game.colorFor]),
+ * so a single composable parameterized over the enum type avoids two near-identical copies
+ * drifting apart. */
 @Composable
-private fun EdgeTypeDropdown(selected: EdgeType?, onSelect: (EdgeType?) -> Unit) {
+private fun <T> TypeDropdown(
+    selected: T?,
+    options: List<T>,
+    displayName: (T) -> String,
+    colorFor: (T) -> Int?,
+    onSelect: (T?) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         Button(onClick = { expanded = true }) {
             Text(
-                selected?.displayName ?: "Random",
-                color = selected?.let { edgeTypeTextColor(it) } ?: Color.Unspecified,
+                selected?.let(displayName) ?: "Random",
+                color = selected?.let { optionTextColor(it, colorFor) } ?: Color.Unspecified,
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -74,11 +108,11 @@ private fun EdgeTypeDropdown(selected: EdgeType?, onSelect: (EdgeType?) -> Unit)
                     expanded = false
                 },
             )
-            EdgeType.entries.forEach { edgeType ->
+            options.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(edgeType.displayName, color = edgeTypeTextColor(edgeType)) },
+                    text = { Text(displayName(option), color = optionTextColor(option, colorFor)) },
                     onClick = {
-                        onSelect(edgeType)
+                        onSelect(option)
                         expanded = false
                     },
                 )

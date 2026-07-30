@@ -24,17 +24,25 @@ import kotlin.math.sqrt
  * (kept around only for a genuinely embedded case, e.g. ceiling
  * [com.scorchedphoto.engine.EdgeType.WRAP]) disagreed at the point a column crossed between
  * them. Only ever lowers solidity (groundY only increases, never decreases) and clamps to a
- * maximum depth so a crater can never dig all the way through to the bottom of the frame.
+ * maximum depth (see [carve]'s `maxGroundY` param, defaulting to [defaultMaxGroundY] - a thin
+ * strip of terrain always survives) so a crater can never dig all the way through to the bottom
+ * of the frame, unless a caller explicitly passes a looser bound (e.g. GameEngine.floorMaxGroundY
+ * for a FloorType that allows a blast to fully open the floor).
  */
 object CraterCarver {
 
     private const val MAX_DEPTH_FRACTION = 0.95f
 
-    fun carve(terrain: HeightMap, impactX: Int, impactY: Int, radius: Int) {
+    /** The default floor clamp - a thin strip of terrain always survives at the very bottom
+     * of the map. Callers that want a floor type to allow a blast to fully hollow a column
+     * down to the map's true bottom (e.g. GameEngine.floorMaxGroundY for any FloorType other
+     * than GROUND/WATER/LAVA) pass their own [carve] `maxGroundY` instead of this default. */
+    fun defaultMaxGroundY(terrain: HeightMap): Int = (terrain.height * MAX_DEPTH_FRACTION).roundToInt()
+
+    fun carve(terrain: HeightMap, impactX: Int, impactY: Int, radius: Int, maxGroundY: Int = defaultMaxGroundY(terrain)) {
         if (radius <= 0) return
         val minColumn = max(0, impactX - radius)
         val maxColumn = min(terrain.width - 1, impactX + radius)
-        val flooredMaxY = (terrain.height * MAX_DEPTH_FRACTION).roundToInt()
         var changed = false
 
         for (x in minColumn..maxColumn) {
@@ -62,7 +70,12 @@ object CraterCarver {
             // explosionBottomY, identical to the old "ordinary" formula.
             val newGroundY = explosionBottomY.coerceIn(existingGroundY, existingGroundY + holeHeight)
 
-            val clampedGroundY = newGroundY.coerceAtMost(flooredMaxY)
+            // coerceAtLeast(existingGroundY) guards the "never raises terrain" invariant against
+            // a caller-supplied maxGroundY that's tighter than a column's already-carved depth
+            // (e.g. FloorType.LAVA's own depth-capped regrowth encountering a column an ordinary,
+            // less-restricted explosion already dug past that cap) - without it, coerceAtMost
+            // alone could pull an already-deeper column back up to the tighter bound.
+            val clampedGroundY = newGroundY.coerceAtMost(maxGroundY).coerceAtLeast(existingGroundY)
             if (clampedGroundY != existingGroundY) {
                 terrain.groundY[x] = clampedGroundY
                 changed = true

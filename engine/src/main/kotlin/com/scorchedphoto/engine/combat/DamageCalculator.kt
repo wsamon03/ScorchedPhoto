@@ -40,4 +40,10 @@ object DamageCalculator {
         val fraction = 1f - t * (1f - MIN_DAMAGE_FRACTION)
         return (weapon.maxDamage * fraction).roundToInt()
     }
+
+    /** A flat amount of damage expressed as a fraction of [Tank.MAX_HEALTH] rather than
+     * derived from a [Weapon] - used by GameEngine's per-round floor mechanics (Lava's touch/
+     * proximity burn), which deal damage relative to a tank's own max health regardless of
+     * distance from any particular impact point. */
+    fun percentOfMaxHealth(fraction: Float): Int = (Tank.MAX_HEALTH * fraction).roundToInt()
 }

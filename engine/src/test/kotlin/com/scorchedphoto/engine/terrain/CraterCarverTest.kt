@@ -100,4 +100,33 @@ class CraterCarverTest {
 
         assertEquals(310, terrain.groundY[5])
     }
+
+    @Test
+    fun `an explicit maxGroundY of the terrain's own height lets a blast fully open a column`() {
+        // A floor type that allows the floor to be fully hollowed (e.g. GameEngine.floorMaxGroundY
+        // for FloorType.HOLE) passes terrain.height itself as maxGroundY - no clamp at all.
+        val terrain = flatTerrain(width = 20, height = 200, groundY = 100)
+        CraterCarver.carve(terrain, impactX = 5, impactY = 190, radius = 60, maxGroundY = terrain.height)
+
+        assertEquals(200, terrain.groundY[5])
+    }
+
+    @Test
+    fun `omitting maxGroundY still clamps to the default 95 percent floor`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 100)
+        CraterCarver.carve(terrain, impactX = 50, impactY = 190, radius = 60)
+        val flooredMax = (200 * 0.95f).roundToInt()
+        assertTrue(terrain.groundY.all { it <= flooredMax })
+    }
+
+    @Test
+    fun `a maxGroundY tighter than a column's already-carved depth never raises it back up`() {
+        // Simulates FloorType.LAVA's own depth-capped regrowth carve() call landing on a column
+        // an earlier, less-restricted explosion already dug past that cap - the tighter bound
+        // here (120) must not pull the column's already-deeper surface (150) back up to it.
+        val terrain = flatTerrain(width = 20, height = 200, groundY = 150)
+        CraterCarver.carve(terrain, impactX = 10, impactY = 190, radius = 30, maxGroundY = 120)
+
+        assertEquals(150, terrain.groundY[10])
+    }
 }
