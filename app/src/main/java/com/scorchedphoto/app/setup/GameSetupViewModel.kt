@@ -2,7 +2,6 @@ package com.scorchedphoto.app.setup
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.scorchedphoto.app.game.PhotoUsageMode
 import com.scorchedphoto.app.game.SkyLook
 import com.scorchedphoto.app.tts.CustomVoice
 import com.scorchedphoto.app.tts.CustomVoiceRepository
@@ -62,15 +61,6 @@ class GameSetupViewModel @Inject constructor(
     // FloorType.GROUND, today's only floor behavior, instead.
     private val _floorType = MutableStateFlow<FloorType?>(FloorType.GROUND)
     val floorType: StateFlow<FloorType?> = _floorType.asStateFlow()
-
-    // No "Random" sentinel, unlike _wallType/_ceilingType/_floorType above - this is a plain
-    // user pick with a real default (BACKGROUND, matching pre-existing behavior), never
-    // resolved at commit time. skyLook/terrainColor (used only by TERRAIN/SKY modes
-    // respectively) are always auto-randomized instead - resolved fresh in commitAndStart,
-    // mirroring how Random wall/ceiling/floor picks resolve there, but with no user-facing
-    // control of their own.
-    private val _photoUsageMode = MutableStateFlow(PhotoUsageMode.BACKGROUND)
-    val photoUsageMode: StateFlow<PhotoUsageMode> = _photoUsageMode.asStateFlow()
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
@@ -164,15 +154,13 @@ class GameSetupViewModel @Inject constructor(
         _floorType.value = type
     }
 
-    fun setPhotoUsageMode(mode: PhotoUsageMode) {
-        _photoUsageMode.value = mode
-    }
-
     /** Resolves "Random" (a null wallType/ceilingType/floorType) to one concrete type per side,
      * each independently, right before the match starts - see _wallType's doc for why this is
-     * the one place that needs to happen. Also resolves skyLook/terrainColor fresh here, the
-     * same way - see _photoUsageMode's own doc for why those two have no user-facing control
-     * of their own. */
+     * the one place that needs to happen. Also resolves skyLook/terrainColor fresh here (used
+     * only by TERRAIN/SKY photo usage modes respectively - always auto-randomized, with no
+     * user-facing control of their own). photoUsageMode itself is left at its default here;
+     * TerrainPreviewViewModel patches it into this same repository entry once the user picks
+     * it on the terrain-creation screen, which is reached only after this commits. */
     fun commitAndStart() {
         val resolvedWallType = _wallType.value ?: EdgeType.entries.random()
         val resolvedCeilingType = _ceilingType.value ?: EdgeType.entries.random()
@@ -182,7 +170,6 @@ class GameSetupViewModel @Inject constructor(
             resolvedWallType,
             resolvedCeilingType,
             resolvedFloorType,
-            photoUsageMode = _photoUsageMode.value,
             skyLook = SkyLook.entries.random(),
             terrainColor = TERRAIN_COLOR_PALETTE.random(),
         )

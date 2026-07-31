@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.scorchedphoto.app.game.PhotoUsageMode
 import com.scorchedphoto.app.game.colorFor
 import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.FloorType
@@ -29,7 +28,6 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
     val wallType by viewModel.wallType.collectAsStateWithLifecycle()
     val ceilingType by viewModel.ceilingType.collectAsStateWithLifecycle()
     val floorType by viewModel.floorType.collectAsStateWithLifecycle()
-    val photoUsageMode by viewModel.photoUsageMode.collectAsStateWithLifecycle()
 
     Scaffold { padding ->
         Column(
@@ -67,16 +65,6 @@ fun GameSettingsScreen(viewModel: GameSetupViewModel, onBack: () -> Unit) {
                 onSelect = viewModel::setFloorType,
             )
 
-            Text("Photo Usage", modifier = Modifier.padding(top = 16.dp))
-            TypeDropdown(
-                selected = photoUsageMode,
-                options = PhotoUsageMode.entries,
-                displayName = { it.displayName },
-                colorFor = { null },
-                onSelect = { viewModel.setPhotoUsageMode(it ?: PhotoUsageMode.BACKGROUND) },
-                includeRandom = false,
-            )
-
             Button(onClick = onBack, modifier = Modifier.padding(top = 24.dp)) {
                 Text("Back")
             }
@@ -103,10 +91,6 @@ private fun <T> TypeDropdown(
     displayName: (T) -> String,
     colorFor: (T) -> Int?,
     onSelect: (T?) -> Unit,
-    // false for pickers with no "Random" concept (e.g. Photo Usage - a deliberate user choice
-    // with a real default, not a per-side value that can be independently rolled at commit
-    // time like wall/ceiling/floor).
-    includeRandom: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
@@ -117,15 +101,13 @@ private fun <T> TypeDropdown(
             )
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (includeRandom) {
-                DropdownMenuItem(
-                    text = { Text("Random") },
-                    onClick = {
-                        onSelect(null)
-                        expanded = false
-                    },
-                )
-            }
+            DropdownMenuItem(
+                text = { Text("Random") },
+                onClick = {
+                    onSelect(null)
+                    expanded = false
+                },
+            )
             options.forEach { option ->
                 DropdownMenuItem(
                     text = { Text(displayName(option), color = optionTextColor(option, colorFor)) },
