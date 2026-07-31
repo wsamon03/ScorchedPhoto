@@ -1,5 +1,7 @@
 package com.scorchedphoto.app.setup
 
+import com.scorchedphoto.app.game.PhotoUsageMode
+import com.scorchedphoto.app.game.SkyLook
 import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ai.Difficulty
@@ -22,6 +24,9 @@ data class MatchConfig(
     val wallType: EdgeType = EdgeType.NONE,
     val ceilingType: EdgeType = EdgeType.NONE,
     val floorType: FloorType = FloorType.GROUND,
+    val photoUsageMode: PhotoUsageMode = PhotoUsageMode.BACKGROUND,
+    val skyLook: SkyLook = SkyLook.CLEAR,
+    val terrainColor: Int = TERRAIN_COLOR_PALETTE.first(),
 )
 
 val TANK_COLOR_PALETTE: List<Int> = listOf(
@@ -31,4 +36,20 @@ val TANK_COLOR_PALETTE: List<Int> = listOf(
     0xFFF9A825L.toInt(),
     0xFF8E24AAL.toInt(),
     0xFFFB8C00L.toInt(),
+)
+
+/** Fixed ground/dirt/grass/stone/sand palette for PhotoUsageMode.SKY - the solid color shown
+ * wherever the sky-clipped photo doesn't cover (below the terrain line). Resolved via
+ * .random() once per match in GameSetupViewModel.commitAndStart, mirroring how EdgeType/
+ * FloorType "Random" already resolves there - never user-picked, no UI lists these directly. */
+val TERRAIN_COLOR_PALETTE: List<Int> = listOf(
+    0xFF6D4C41L.toInt(), // brown dirt
+    0xFF8D6E63L.toInt(), // tan dirt
+    0xFF558B2FL.toInt(), // dark grass green
+    0xFF7CB342L.toInt(), // grass green
+    0xFF9E9E76L.toInt(), // dusty olive
+    0xFFC2B280L.toInt(), // desert sand
+    0xFF757575L.toInt(), // grey stone
+    0xFF5D4037L.toInt(), // dark earth/mud
+    0xFFA1887FL.toInt(), // pale clay
 )

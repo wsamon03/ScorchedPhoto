@@ -11,6 +11,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
+import com.scorchedphoto.app.setup.TERRAIN_COLOR_PALETTE
 import com.scorchedphoto.engine.BounceEffect
 import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.FloorType
@@ -56,6 +57,9 @@ class GameRenderer(
     private val wallType: EdgeType = EdgeType.NONE,
     private val ceilingType: EdgeType = EdgeType.NONE,
     private val floorType: FloorType = FloorType.GROUND,
+    private val photoUsageMode: PhotoUsageMode = PhotoUsageMode.BACKGROUND,
+    private val skyLook: SkyLook = SkyLook.CLEAR,
+    private val terrainColor: Int = TERRAIN_COLOR_PALETTE.first(),
     private val onBurnMessageAssigned: (tankId: Int, spokenText: String) -> Unit = { _, _ -> },
 ) {
 
@@ -106,6 +110,12 @@ class GameRenderer(
         strokeWidth = 2f
     }
 
+    // PhotoUsageMode.TERRAIN's procedural sky look - see drawSkyLook.
+    private val skyGradientPaint = Paint()
+    private val glowDiscPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val cloudPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val starPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     // TEMP DIAGNOSTIC (see plan doc) - remove once the gallery-photo choppiness cause is found.
     private val debugTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.YELLOW
@@ -128,6 +138,13 @@ class GameRenderer(
     // width unconditionally every frame, so a fresh Path() here was a real per-frame cost.
     private val craterPath = Path()
     private val horizonPath = Path()
+
+    // Reused every terrain-layer redraw for PhotoUsageMode.TERRAIN/SKY's photo clip - see
+    // buildTerrainClipPath. Only one of the two clip shapes (ground-down or sky-up) is ever
+    // built during this renderer's lifetime, since photoUsageMode is fixed for the whole
+    // match, so a single shared field suffices here (unlike craterPath/horizonPath above,
+    // which are both genuinely redrawn every time).
+    private val terrainClipPath = Path()
 
     // Reused every frame for the same reason - see the loop above.
     private val backgroundRect = RectF()
@@ -207,6 +224,14 @@ class GameRenderer(
     private val wrapEffectsStartNanos = System.nanoTime()
     private val wallWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 4242) }
     private val ceilingWrapSparkles: List<WrapSparkle> by lazy { generateWrapSparkles(seed = 9191) }
+
+    // SkyLook.CLOUDY's cloud-puff scatter and SkyLook.NIGHT_STARS[_MOON]'s star scatter -
+    // generated once, deterministically, and cached exactly like wallWrapSparkles/
+    // ceilingWrapSparkles above, so the layout doesn't flicker by being re-randomized whenever
+    // the terrain layer redraws. Safe to declare unconditionally even for skyLooks that never
+    // use one of these - by lazy only actually runs on first access.
+    private val cloudPuffs: List<CloudPuff> by lazy { generateClouds(seed = 5151) }
+    private val stars: List<Star> by lazy { generateStars(seed = 6161) }
 
     // Same wall-clock-based animation baseline as wrapEffectsStartNanos above, but shared by
     // FloorType.WATER's rising wavy border and FloorType.LAVA's small surface waves/bumps (see
@@ -368,14 +393,55 @@ class GameRenderer(
         val terrainCanvas = terrainLayerCanvas ?: return
         terrainCanvas.drawColor(Color.BLACK)
 
-        if (photo != null && srcRect != null) {
-            backgroundRect.set(
-                transform.screenX(0f),
-                transform.screenY(0f),
-                transform.screenX(terrain.width.toFloat()),
-                transform.screenY(terrain.height.toFloat()),
-            )
-            terrainCanvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
+        // PhotoUsageMode.TERRAIN/SKY each draw a full-canvas, unclipped complementary layer
+        // first (a sky look / a flat terrain color) so the photo - drawn on top, clipped to
+        // only its own region - simply covers whatever part of it it occupies. See
+        // buildTerrainClipPath's own doc for why this whole block re-running here (whenever
+        // this cached layer redraws - see draw()'s own terrain.version dirty check) is what
+        // keeps the visible photo region "adjusting as the terrain adjusts" live, with no
+        // extra invalidation logic of its own.
+        when (photoUsageMode) {
+            PhotoUsageMode.BACKGROUND -> {
+                if (photo != null && srcRect != null) {
+                    backgroundRect.set(
+                        transform.screenX(0f),
+                        transform.screenY(0f),
+                        transform.screenX(terrain.width.toFloat()),
+                        transform.screenY(terrain.height.toFloat()),
+                    )
+                    terrainCanvas.drawBitmap(photo, srcRect, backgroundRect, backgroundPaint)
+                }
+            }
+            PhotoUsageMode.TERRAIN -> {
+                drawSkyLook(terrainCanvas, skyLook)
+                if (photo != null && srcRect != null) {
+                    backgroundRect.set(
+                        transform.screenX(0f),
+                        transform.screenY(0f),
+                        transform.screenX(terrain.width.toFloat()),
+                        transform.screenY(terrain.height.toFloat()),
+                    )
+                    drawClippedPhoto(
+                        terrainCanvas, photo, srcRect, backgroundRect,
+                        buildTerrainClipPath(terrain, transform, closeAtBottom = true),
+                    )
+                }
+            }
+            PhotoUsageMode.SKY -> {
+                terrainCanvas.drawColor(terrainColor)
+                if (photo != null && srcRect != null) {
+                    backgroundRect.set(
+                        transform.screenX(0f),
+                        transform.screenY(0f),
+                        transform.screenX(terrain.width.toFloat()),
+                        transform.screenY(terrain.height.toFloat()),
+                    )
+                    drawClippedPhoto(
+                        terrainCanvas, photo, srcRect, backgroundRect,
+                        buildTerrainClipPath(terrain, transform, closeAtBottom = false),
+                    )
+                }
+            }
         }
 
         drawCraterScars(terrainCanvas, terrain, transform)
@@ -472,6 +538,41 @@ class GameRenderer(
         regionFillPath.lineTo(transform.screenX(minX.toFloat()), bottomY)
         regionFillPath.close()
         canvas.drawPath(regionFillPath, paint)
+    }
+
+    /** The closed clip region bounded by the terrain's own ground line (walked column by
+     * column across the *entire* terrain width, the same per-column walk [drawHorizonLine]/
+     * [drawRegionFill] already use) and either the map's bottom edge ([closeAtBottom] = true -
+     * [PhotoUsageMode.TERRAIN]'s "photo shows below the line") or its top edge
+     * ([closeAtBottom] = false - [PhotoUsageMode.SKY]'s "photo shows above the line").
+     * Rebuilt fresh from the *current* [HeightMap.groundY] every call - this is only ever
+     * called from [redrawTerrainLayer], which itself only re-runs when [HeightMap.version] has
+     * actually advanced or the canvas resized (see [draw]'s own dirty check), so this is how
+     * the visible photo region keeps re-clipping live as craters are carved / Void/Lava
+     * regions grow, with no extra invalidation logic of its own. */
+    private fun buildTerrainClipPath(terrain: HeightMap, transform: WorldTransform, closeAtBottom: Boolean): Path {
+        terrainClipPath.reset()
+        for (x in 0 until terrain.width) {
+            val px = transform.screenX(x.toFloat())
+            val py = transform.screenY(terrain.groundY[x].toFloat())
+            if (x == 0) terrainClipPath.moveTo(px, py) else terrainClipPath.lineTo(px, py)
+        }
+        val closeY = transform.screenY(if (closeAtBottom) terrain.height.toFloat() else 0f)
+        terrainClipPath.lineTo(transform.screenX((terrain.width - 1).toFloat()), closeY)
+        terrainClipPath.lineTo(transform.screenX(0f), closeY)
+        terrainClipPath.close()
+        return terrainClipPath
+    }
+
+    /** save()/clipPath()/drawBitmap()/restore() around the photo draw, for
+     * [PhotoUsageMode.TERRAIN]/[PhotoUsageMode.SKY] - the one place in this file
+     * [Canvas.clipPath] is used (standard Android API, already used elsewhere in the app -
+     * e.g. WindIndicator's own Compose `clipPath` for its circular gauge mask). */
+    private fun drawClippedPhoto(canvas: Canvas, photo: Bitmap, srcRect: Rect, dstRect: RectF, clipPath: Path) {
+        canvas.save()
+        canvas.clipPath(clipPath)
+        canvas.drawBitmap(photo, srcRect, dstRect, backgroundPaint)
+        canvas.restore()
     }
 
     /** A fixed-color border along the screen edges the current [wallType] (left/right),
@@ -629,6 +730,151 @@ class GameRenderer(
         val twinkleSpeed: Float,
         val radius: Float,
     )
+
+    // [PhotoUsageMode.TERRAIN]'s procedural sky backdrop - drawn wherever the terrain-clipped
+    // photo doesn't cover (see redrawTerrainLayer). One of 7 SkyLook values, resolved once per
+    // match and never re-rolled - this dispatch is purely a function of the fixed skyLook
+    // field, not of terrain/animation state, so it's safe to live in the cached terrain layer
+    // (no per-frame twinkle here - see drawStars' own doc for why, unlike drawWrapSparkles
+    // which *is* animated every frame as part of the dynamic overlay). Composed from 3 shared
+    // primitives, each reusing an idiom already established elsewhere in this file:
+    // drawSkyGradientBand (drawWrapGlowBand's own LinearGradient idiom), drawGlowDisc
+    // (drawGradientCircle's own manual concentric-circle idiom, for a sun/moon), and the
+    // cached cloudPuffs/stars scatter (generateWrapSparkles' own caching idiom). Positions are
+    // plain canvas-fraction coordinates - this is screen-space decoration, like
+    // drawEdgeBorders, not tied to WorldTransform/world coordinates.
+
+    private fun drawSkyLook(canvas: Canvas, skyLook: SkyLook) {
+        val width = canvas.width.toFloat()
+        val height = canvas.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+        when (skyLook) {
+            SkyLook.CLEAR -> drawClearSky(canvas, width, height)
+            SkyLook.CLOUDY -> {
+                drawClearSky(canvas, width, height)
+                drawClouds(canvas, width, height)
+            }
+            SkyLook.SUNRISE -> drawDuskSky(
+                canvas, width, height,
+                top = Color.rgb(0x1A, 0x23, 0x7E), bottom = Color.rgb(0xFF, 0xCC, 0x80),
+                sunCore = Color.rgb(0xFF, 0xF5, 0x9D), sunGlow = Color.argb(140, 0xFF, 0xB7, 0x4D),
+            )
+            SkyLook.SUNSET -> drawDuskSky(
+                canvas, width, height,
+                top = Color.rgb(0x31, 0x1B, 0x92), bottom = Color.rgb(0xE6, 0x51, 0x00),
+                sunCore = Color.rgb(0xFF, 0xAB, 0x40), sunGlow = Color.argb(150, 0xD8, 0x43, 0x15),
+            )
+            SkyLook.NIGHT_CLEAR -> drawNightSky(canvas, width, height)
+            SkyLook.NIGHT_STARS -> {
+                drawNightSky(canvas, width, height)
+                drawStars(canvas, width, height)
+            }
+            SkyLook.NIGHT_STARS_MOON -> {
+                drawNightSky(canvas, width, height)
+                drawStars(canvas, width, height)
+                drawMoon(canvas, width, height)
+            }
+        }
+    }
+
+    private fun drawClearSky(canvas: Canvas, width: Float, height: Float) =
+        drawSkyGradientBand(canvas, width, height, top = Color.rgb(0x42, 0xA5, 0xF5), bottom = Color.rgb(0xE1, 0xF5, 0xFE))
+
+    private fun drawNightSky(canvas: Canvas, width: Float, height: Float) =
+        drawSkyGradientBand(canvas, width, height, top = Color.rgb(0x02, 0x02, 0x0B), bottom = Color.rgb(0x1A, 0x1A, 0x3D))
+
+    private fun drawDuskSky(canvas: Canvas, width: Float, height: Float, top: Int, bottom: Int, sunCore: Int, sunGlow: Int) {
+        drawSkyGradientBand(canvas, width, height, top, bottom)
+        drawGlowDisc(canvas, cx = width * 0.7f, cy = height * 0.72f, coreRadius = min(width, height) * 0.06f, coreColor = sunCore, glowColor = sunGlow)
+    }
+
+    private fun drawMoon(canvas: Canvas, width: Float, height: Float) = drawGlowDisc(
+        canvas, cx = width * 0.75f, cy = height * 0.15f, coreRadius = min(width, height) * 0.045f,
+        coreColor = Color.rgb(0xEC, 0xEF, 0xF1), glowColor = Color.argb(110, 0xCF, 0xD8, 0xDC),
+    )
+
+    /** Shared vertical LinearGradient band, [top] to [bottom] - the same shader-reassign idiom
+     * [drawWrapGlowBand] already uses, just top-to-bottom instead of edge-to-edge. */
+    private fun drawSkyGradientBand(canvas: Canvas, width: Float, height: Float, top: Int, bottom: Int) {
+        skyGradientPaint.shader = LinearGradient(0f, 0f, 0f, height, top, bottom, Shader.TileMode.CLAMP)
+        canvas.drawRect(0f, 0f, width, height, skyGradientPaint)
+    }
+
+    /** Shared soft circular glow for a sun/moon - the same manual concentric-`drawCircle`-steps
+     * idiom [drawGradientCircle] already uses for the impact-explosion flash, fading from
+     * [glowColor] at the outer radius down to a fully opaque [coreColor] disc at the center. */
+    private fun drawGlowDisc(canvas: Canvas, cx: Float, cy: Float, coreRadius: Float, coreColor: Int, glowColor: Int) {
+        val glowRadius = coreRadius * GLOW_DISC_RADIUS_MULTIPLIER
+        val steps = 12
+        for (i in steps downTo 1) {
+            val fraction = i.toFloat() / steps
+            val r = coreRadius + (glowRadius - coreRadius) * fraction
+            val alpha = (Color.alpha(glowColor) * fraction).toInt()
+            glowDiscPaint.color = Color.argb(alpha, Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor))
+            canvas.drawCircle(cx, cy, r, glowDiscPaint)
+        }
+        glowDiscPaint.color = coreColor
+        canvas.drawCircle(cx, cy, coreRadius, glowDiscPaint)
+    }
+
+    private fun drawClouds(canvas: Canvas, width: Float, height: Float) {
+        cloudPaint.shader = null
+        for (puff in cloudPuffs) {
+            cloudPaint.color = Color.argb(puff.alpha, 255, 255, 255)
+            val cx = puff.nx * width
+            val cy = puff.ny * height
+            val r = puff.radiusFraction * min(width, height)
+            canvas.drawCircle(cx, cy, r, cloudPaint)
+            canvas.drawCircle(cx + r * 0.8f, cy + r * 0.15f, r * 0.7f, cloudPaint)
+            canvas.drawCircle(cx - r * 0.8f, cy + r * 0.15f, r * 0.7f, cloudPaint)
+        }
+    }
+
+    private fun generateClouds(seed: Int): List<CloudPuff> {
+        val rng = kotlin.random.Random(seed)
+        return (0 until CLOUD_COUNT).map {
+            CloudPuff(
+                nx = rng.nextFloat(),
+                ny = rng.nextFloat() * 0.4f,
+                radiusFraction = 0.03f + rng.nextFloat() * 0.04f,
+                alpha = 170 + rng.nextInt(60),
+            )
+        }
+    }
+
+    /** One cloud puff's layout within [SkyLook.CLOUDY]'s scatter, normalized to the canvas's
+     * own width/height so the same list works regardless of real screen size - see
+     * [drawClouds]/[cloudPuffs]. */
+    private data class CloudPuff(val nx: Float, val ny: Float, val radiusFraction: Float, val alpha: Int)
+
+    // Not animated (no wall-clock twinkle) - this layer lives in the *cached* terrainLayerCanvas,
+    // which only redraws when terrain.version advances or the canvas resizes (see
+    // redrawTerrainLayer), not every frame, so a per-frame twinkle here wouldn't actually
+    // animate smoothly - unlike drawWrapSparkles, which is drawn fresh every frame as part of
+    // the dynamic overlay.
+    private fun drawStars(canvas: Canvas, width: Float, height: Float) {
+        starPaint.shader = null
+        for (star in stars) {
+            starPaint.color = Color.argb(star.alpha, 255, 255, 255)
+            canvas.drawCircle(star.nx * width, star.ny * height, star.radius, starPaint)
+        }
+    }
+
+    private fun generateStars(seed: Int): List<Star> {
+        val rng = kotlin.random.Random(seed)
+        return (0 until STAR_COUNT).map {
+            Star(
+                nx = rng.nextFloat(),
+                ny = rng.nextFloat() * 0.8f,
+                radius = 1f + rng.nextFloat() * 1.5f,
+                alpha = 140 + rng.nextInt(115),
+            )
+        }
+    }
+
+    /** One star's layout within [SkyLook.NIGHT_STARS]/[SkyLook.NIGHT_STARS_MOON]'s scatter,
+     * normalized the same way as [CloudPuff] - see [drawStars]/[stars]. */
+    private data class Star(val nx: Float, val ny: Float, val radius: Float, val alpha: Int)
 
     /** Draws everything that doesn't change while a shot is purely in flight - see [draw]'s
      * doc - into [staticLayerCanvas]: the cached terrain layer as a base, then every tank's
@@ -1356,6 +1602,12 @@ class GameRenderer(
         private const val WAVE_SPEED = 2f
         private const val WAVE_STEP_PX = 6f
         private const val LAVA_SPECK_COUNT = 14
+
+        // PhotoUsageMode.TERRAIN's procedural sky look - see drawSkyLook/drawGlowDisc/
+        // generateClouds/generateStars.
+        private const val GLOW_DISC_RADIUS_MULTIPLIER = 2.5f
+        private const val CLOUD_COUNT = 5
+        private const val STAR_COUNT = 40
 
         // Tank body half-width shares Tank.RADIUS with GameEngine's hit-detection radius,
         // so the visual size and the actual collision size never drift apart. The rest of

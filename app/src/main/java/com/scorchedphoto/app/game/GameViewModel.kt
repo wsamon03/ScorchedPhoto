@@ -41,6 +41,12 @@ class GameViewModel @Inject constructor(
 
     val engine: GameEngine
     val backgroundPhoto: Bitmap? = photoRepository.workingPhoto
+    // Set inside init, where matchConfig is in scope - a plain val read straight off it, the
+    // same pattern backgroundPhoto above already uses, since these have no physics role and so
+    // (unlike wallType/ceilingType/floorType) never pass through GameEngine at all.
+    val photoUsageMode: PhotoUsageMode
+    val skyLook: SkyLook
+    val terrainColor: Int
 
     /** HUD -> engine intents, drained exclusively by [GameLoopThread]. */
     val commandQueue = ConcurrentLinkedQueue<GameCommand>()
@@ -70,6 +76,9 @@ class GameViewModel @Inject constructor(
         val matchConfig = requireNotNull(matchConfigRepository.matchConfig) {
             "GameScreen reached with no match configured"
         }
+        photoUsageMode = matchConfig.photoUsageMode
+        skyLook = matchConfig.skyLook
+        terrainColor = matchConfig.terrainColor
 
         // Freshly time-seeded (not a fixed/injected Random) so tanks land somewhere new
         // each time this ViewModel is constructed - including "Rematch", which navigates

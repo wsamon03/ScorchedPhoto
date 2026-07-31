@@ -20,6 +20,9 @@ class GameSurfaceView(
     context: Context,
     private val engine: GameEngine,
     photo: Bitmap?,
+    photoUsageMode: PhotoUsageMode,
+    skyLook: SkyLook,
+    terrainColor: Int,
     private val commandQueue: ConcurrentLinkedQueue<GameCommand>,
     private val onStateChanged: () -> Unit,
     onBurnMessageAssigned: (Int, String) -> Unit,
@@ -38,6 +41,9 @@ class GameSurfaceView(
         wallType = engine.wallType,
         ceilingType = engine.ceilingType,
         floorType = engine.floorType,
+        photoUsageMode = photoUsageMode,
+        skyLook = skyLook,
+        terrainColor = terrainColor,
         onBurnMessageAssigned = onBurnMessageAssigned,
     )
     private var loopThread: GameLoopThread? = null
