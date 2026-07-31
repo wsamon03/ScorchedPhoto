@@ -1339,7 +1339,7 @@ class GameRenderer(
         private const val WRAP_SPARKLE_COUNT = 26
         private const val WRAP_SPARKLE_MIN_ALPHA = 40
         private const val WRAP_SPARKLE_MAX_ALPHA = 230
-        private const val PROJECTILE_RADIUS = 5f
+        private const val PROJECTILE_RADIUS = 2.5f
         private const val BARREL_STROKE_WIDTH = 1.25f
 
         // FloorType.WATER's wavy rising border/fill and FloorType.LAVA's small surface bumps -

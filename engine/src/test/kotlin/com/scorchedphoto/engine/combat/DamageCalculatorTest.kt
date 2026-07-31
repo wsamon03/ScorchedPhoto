@@ -9,8 +9,8 @@ import org.junit.Test
 
 class DamageCalculatorTest {
 
-    // blastRadius=28, maxDamage=35. Tank.RADIUS=28, so bullseyeRadius=28*0.2=5.6 and
-    // maxReach=28+28=56.
+    // blastRadius=28, maxDamage=35. Tank.RADIUS=10.5, so bullseyeRadius=10.5*0.2=2.1 and
+    // maxReach=10.5+28=38.5.
     private val weapon = WeaponCatalog.STANDARD_SHELL
 
     private fun tankAtDistance(distance: Float) = testTank(id = 1, x = 100f + distance, y = 100f)
