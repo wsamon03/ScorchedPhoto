@@ -73,7 +73,7 @@ fun HomeScreen(onNewGame: () -> Unit, onSettings: () -> Unit) {
                 Icon(
                     imageVector = Icons.Filled.Settings,
                     contentDescription = "Settings",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.primary,
                 )
             }
 

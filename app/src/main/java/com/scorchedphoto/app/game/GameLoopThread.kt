@@ -6,6 +6,7 @@ import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.GameEvent
 import com.scorchedphoto.engine.MatchPhase
 import com.scorchedphoto.engine.ai.CpuAimCalculator
+import com.scorchedphoto.engine.ai.CpuWeaponSelector
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.normalizeAngleDeg
@@ -285,10 +286,16 @@ class GameLoopThread(
         cpuThinkingElapsed += dt
         if (cpuThinkingElapsed < CPU_THINKING_SECONDS) return
 
-        val target = engine.tanks
-            .filter { it.alive && it.ownerId != current.ownerId }
-            .randomOrNull(cpuRandom)
-            ?: return
+        val enemies = engine.tanks.filter { it.alive && it.ownerId != current.ownerId }
+        val target = enemies.randomOrNull(cpuRandom) ?: return
+
+        current.currentWeapon = CpuWeaponSelector.selectWeapon(
+            target = target,
+            otherEnemiesAlive = enemies.size,
+            difficulty = current.difficulty,
+            ammoFor = { engine.ammoFor(current.id, it) },
+            rng = cpuRandom,
+        )
 
         val aim = CpuAimCalculator.computeAim(current, target, engine.terrain, engine.wind, current.difficulty, cpuRandom)
         current.angleDeg = aim.angleDeg
