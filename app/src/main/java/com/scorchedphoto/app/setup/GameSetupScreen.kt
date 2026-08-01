@@ -90,7 +90,11 @@ fun GameSetupScreen(
             ) {
                 Text("Game Setup", style = MaterialTheme.typography.headlineMedium)
                 IconButton(onClick = onOpenSettings) {
-                    Icon(imageVector = Icons.Filled.Settings, contentDescription = "Match Settings")
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Match Settings",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
             }
 

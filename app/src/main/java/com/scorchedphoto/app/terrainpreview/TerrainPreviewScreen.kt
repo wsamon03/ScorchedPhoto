@@ -119,7 +119,11 @@ fun TerrainPreviewScreen(
                     .padding(16.dp),
             ) {
                 IconButton(onClick = { menuExpanded = true }) {
-                    Icon(imageVector = Icons.Filled.Menu, contentDescription = "Terrain options")
+                    Icon(
+                        imageVector = Icons.Filled.Menu,
+                        contentDescription = "Terrain options",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
                 }
                 DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                     Text(
