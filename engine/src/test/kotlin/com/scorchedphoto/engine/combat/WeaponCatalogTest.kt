@@ -2,7 +2,6 @@ package com.scorchedphoto.engine.combat
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class WeaponCatalogTest {
@@ -21,15 +20,15 @@ class WeaponCatalogTest {
     }
 
     @Test
-    fun `standard shell and baby missile have unlimited ammo`() {
-        assertNull(WeaponCatalog.STANDARD_SHELL.ammoLimit)
+    fun `baby missile has unlimited ammo`() {
         assertNull(WeaponCatalog.BABY_MISSILE.ammoLimit)
     }
 
     @Test
-    fun `big bertha and MIRV have limited ammo`() {
-        assertNotNull(WeaponCatalog.BIG_BERTHA.ammoLimit)
-        assertNotNull(WeaponCatalog.MIRV.ammoLimit)
+    fun `standard shell, big bertha and MIRV have limited starting ammo`() {
+        assertEquals(5, WeaponCatalog.STANDARD_SHELL.ammoLimit)
+        assertEquals(1, WeaponCatalog.BIG_BERTHA.ammoLimit)
+        assertEquals(1, WeaponCatalog.MIRV.ammoLimit)
     }
 
     @Test

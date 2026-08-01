@@ -9,7 +9,7 @@ object WeaponCatalog {
         displayName = "Standard Shell",
         blastRadius = 28f,
         maxDamage = 35,
-        ammoLimit = null,
+        ammoLimit = 5,
     )
 
     val BIG_BERTHA = Weapon(
@@ -17,7 +17,7 @@ object WeaponCatalog {
         displayName = "Big Bertha",
         blastRadius = 55f,
         maxDamage = 60,
-        ammoLimit = 3,
+        ammoLimit = 1,
     )
 
     val MIRV = Weapon(
@@ -25,7 +25,7 @@ object WeaponCatalog {
         displayName = "MIRV",
         blastRadius = 26f,
         maxDamage = 30,
-        ammoLimit = 2,
+        ammoLimit = 1,
         childCount = 4,
         childSpreadDegrees = 40f,
     )

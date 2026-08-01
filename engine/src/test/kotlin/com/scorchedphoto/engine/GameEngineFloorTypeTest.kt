@@ -873,16 +873,23 @@ class GameEngineFloorTypeTest {
         val terrain = flatTerrain(width = 1000, height = 1000, groundY = 985)
         val t1 = testTank(id = 1, ownerId = 1, x = 500f, health = 1000)
         val t2 = testTank(id = 2, ownerId = 2, x = 100f, health = 1000)
-        t1.currentWeapon = WeaponType.BIG_BERTHA
-        t2.currentWeapon = WeaponType.BIG_BERTHA
         val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, floorType = FloorType.LAVA, rng = Random(1))
 
         val firer = engine.currentTank!!
         val victim = if (firer === t1) t2 else t1
+        // Big Bertha only for the seed shot, matching this test's originally-tuned carve
+        // geometry - then back to the default (Standard Shell) for every later filler shot.
+        // Those later shots are pure "advance the round" fillers whose only job is to complete
+        // rounds (the victim's damage comes from being manually positioned on/near the region,
+        // not from the shots themselves), and Big Bertha's now-limited ammo (see WeaponCatalog)
+        // would otherwise run out and silently no-op a filler shot before all rounds needed
+        // here complete.
+        firer.currentWeapon = WeaponType.BIG_BERTHA
         firer.angleDeg = 45f
         firer.power = 30f
         engine.fire()
         runUntilNotResolving(engine)
+        firer.currentWeapon = WeaponType.STANDARD_SHELL
 
         assertEquals(1, engine.lavaRegions.size)
         val region = engine.lavaRegions.single()
