@@ -45,4 +45,7 @@ data class Weapon(
     // dotRounds round boundaries - see GameEngine.applyPendingDotDamage.
     val dotFraction: Float = 0f,
     val dotRounds: Int = 0,
+    // Whether that damage-over-time shows as a burning-tank fire animation (Napalm) rather
+    // than no distinct visual at all (Nuke's radiation) - see Tank.dotBurning.
+    val dotIsFire: Boolean = false,
 )

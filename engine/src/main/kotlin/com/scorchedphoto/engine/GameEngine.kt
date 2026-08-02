@@ -505,6 +505,7 @@ class GameEngine(
                         // Tank.dotRoundsRemaining's own doc.
                         tank.dotRoundsRemaining = weapon.dotRounds
                         tank.dotDamagePerRound = DamageCalculator.percentOfMaxHealth(weapon.dotFraction)
+                        tank.dotBurning = weapon.dotIsFire
                     }
                 }
             }
@@ -678,7 +679,11 @@ class GameEngine(
             if (!tank.alive || tank.dotRoundsRemaining <= 0) continue
             tank.health = (tank.health - tank.dotDamagePerRound).coerceAtLeast(0)
             tank.dotRoundsRemaining--
-            if (tank.health == 0) killOrDrown(tank)
+            if (tank.health == 0) {
+                killOrDrown(tank)
+            } else if (tank.dotRoundsRemaining <= 0) {
+                tank.dotBurning = false
+            }
         }
     }
 

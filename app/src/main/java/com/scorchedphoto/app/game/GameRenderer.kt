@@ -948,6 +948,12 @@ class GameRenderer(
         }
 
         for (tank in tanks) {
+            // Independent of the death-sequence chain below (see Tank.dotBurning's own doc) -
+            // a still-alive, napalm-burning tank can show this fire *and* its own firing
+            // speech bubble in the same frame, so this isn't part of the else-if chain.
+            if (tank.alive && tank.dotBurning) {
+                drawDotBurningTank(canvas, tank, transform)
+            }
             if (tank.fallingThroughFloor) {
                 drawFallThroughSpeechBubble(canvas, tank, transform)
             } else if (tank.rising) {
@@ -1394,9 +1400,14 @@ class GameRenderer(
         canvas.drawLine(cx, cy, endX, endY, barrelPaint)
     }
 
-    private fun drawBurningTank(canvas: Canvas, tank: Tank, transform: WorldTransform) {
-        if (fireFrames.isEmpty()) return
-        val frameIndex = ((tank.burningElapsed * 1000).toLong() / FIRE_FRAME_DURATION_MS % fireFrames.size).toInt()
+    /** The shared flame sprite draw - used both by [drawBurningTank] (the death sequence,
+     * timed off [Tank.burningElapsed]) and [drawDotBurningTank] (a living, napalm-burning
+     * tank, timed off a continuous wall-clock instead - see that function's own doc). Returns
+     * the flame's own screen-space bounds so callers can anchor a speech bubble above it, or
+     * `null` if there's nothing to draw. */
+    private fun drawFireOverlay(canvas: Canvas, tank: Tank, transform: WorldTransform, elapsedSeconds: Float): RectF? {
+        if (fireFrames.isEmpty()) return null
+        val frameIndex = ((elapsedSeconds * 1000).toLong() / FIRE_FRAME_DURATION_MS % fireFrames.size).toInt()
         val frame = fireFrames[frameIndex]
 
         val cx = transform.screenX(tank.x)
@@ -1413,8 +1424,24 @@ class GameRenderer(
         val flameWidth = flameHeight * frame.width / frame.height
         val dst = RectF(cx - flameWidth / 2f, flameBottom - flameHeight, cx + flameWidth / 2f, flameBottom)
         canvas.drawBitmap(frame, null, dst, fireFramePaint)
+        return dst
+    }
 
-        burnMessageFor(tank)?.let { drawSpeechBubble(canvas, cx, dst.top, it) }
+    private fun drawBurningTank(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val dst = drawFireOverlay(canvas, tank, transform, tank.burningElapsed) ?: return
+        burnMessageFor(tank)?.let { drawSpeechBubble(canvas, dst.centerX(), dst.top, it) }
+    }
+
+    /** A still-alive tank currently taking Napalm's lingering burn damage (see
+     * [Tank.dotBurning]) - the same flame sprite [drawBurningTank] uses for a dying tank, but
+     * with no death taunt (this tank isn't dying), and timed off a continuous wall-clock
+     * ([floorEffectsStartNanos]) rather than [Tank.burningElapsed], since this can span many
+     * rounds/turns - including whole [MatchPhase.AIMING] stretches [GameEngine.tick] never
+     * runs during - and must keep animating smoothly throughout, not just while a shot is
+     * actually resolving. */
+    private fun drawDotBurningTank(canvas: Canvas, tank: Tank, transform: WorldTransform) {
+        val elapsedSeconds = (System.nanoTime() - floorEffectsStartNanos) / 1_000_000_000f
+        drawFireOverlay(canvas, tank, transform, elapsedSeconds)
     }
 
     /** Shows a tank's pre-fire taunt - see [GameLoopThread.beginFireSequence], which picks

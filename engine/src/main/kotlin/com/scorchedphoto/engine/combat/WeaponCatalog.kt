@@ -79,25 +79,28 @@ object WeaponCatalog {
         terrainEffect = TerrainEffect.FILL,
     )
 
-    /** A moderate blast that sets survivors burning - 5% of max health at the start of each
-     * of the next 2 rounds, reusing the exact same lingering-damage mechanism as [NUKE]. */
+    /** A moderate blast that sets survivors burning - 10% of max health at the start of each
+     * of the next 4 rounds, reusing the exact same lingering-damage mechanism as [NUKE], with
+     * a real fire animation (see [Weapon.dotIsFire]/[com.scorchedphoto.engine.tanks.Tank.dotBurning])
+     * for as long as it lingers. */
     val NAPALM = Weapon(
         type = WeaponType.NAPALM,
         displayName = "Napalm",
         blastRadius = 32f,
         maxDamage = 25,
         ammoLimit = 2,
-        dotFraction = 0.05f,
-        dotRounds = 2,
+        dotFraction = 0.10f,
+        dotRounds = 4,
+        dotIsFire = true,
     )
 
     /** A precise, heavy single-target round: a small blast radius keeps collateral damage
-     * low while still hitting nearly as hard as Big Bertha. */
+     * low while still hitting harder than any other single-shot weapon in the roster. */
     val WIDOWMAKER = Weapon(
         type = WeaponType.WIDOWMAKER,
         displayName = "Widowmaker",
         blastRadius = 10f,
-        maxDamage = 45,
+        maxDamage = 90,
         ammoLimit = 2,
     )
 

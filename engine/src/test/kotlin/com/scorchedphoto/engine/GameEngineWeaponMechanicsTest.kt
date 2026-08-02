@@ -194,6 +194,58 @@ class GameEngineWeaponMechanicsTest {
         assertEquals(DamageCalculator.percentOfMaxHealth(WeaponCatalog.NUKE.dotFraction), victim.dotDamagePerRound)
     }
 
+    @Test
+    fun `a Napalm hit that doesn't kill sets dotBurning true, clearing it exactly when the DoT itself ends`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 700f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        shooter.currentWeapon = WeaponType.NAPALM
+        // Near the edge of Napalm's own (much smaller than Nuke's) blast radius rather than
+        // right on top of the victim - close enough for ordinary survivable damage, but far
+        // enough that the crater it carves doesn't dig a pit directly under the victim's own
+        // feet, which would otherwise land its very next "safe" filler shot back on itself.
+        fireAtX(engine, victim.x + 30f)
+        shooter.currentWeapon = WeaponType.STANDARD_SHELL
+
+        assertTrue("expected the victim to survive the initial blast", victim.alive)
+        assertEquals(4, victim.dotRoundsRemaining)
+        assertTrue("expected Napalm's DoT to show a fire animation", victim.dotBurning)
+
+        fireSafeFillerShot(engine) // victim's turn - completes round 1
+        assertEquals(3, victim.dotRoundsRemaining)
+        assertTrue(victim.dotBurning)
+
+        repeat(2) {
+            fireSafeFillerShot(engine) // shooter's turn
+            fireSafeFillerShot(engine) // victim's turn - completes a round
+        }
+        assertEquals(1, victim.dotRoundsRemaining)
+        assertTrue("expected dotBurning to stay true with a round still remaining", victim.dotBurning)
+
+        fireSafeFillerShot(engine) // round 4, turn 1
+        fireSafeFillerShot(engine) // completes round 4 - the last burn tick
+        assertEquals(0, victim.dotRoundsRemaining)
+        assertFalse("expected dotBurning to clear once the DoT itself ends", victim.dotBurning)
+    }
+
+    @Test
+    fun `a Nuke hit never sets dotBurning - its radiation has no fire animation`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 700f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        shooter.currentWeapon = WeaponType.NUKE
+        fireAtX(engine, victim.x + Tank.RADIUS + 5f)
+
+        assertTrue(victim.dotRoundsRemaining > 0)
+        assertFalse(victim.dotBurning)
+    }
+
     // --- Earthmover: raises terrain instead of carving it --------------------------------------
 
     @Test

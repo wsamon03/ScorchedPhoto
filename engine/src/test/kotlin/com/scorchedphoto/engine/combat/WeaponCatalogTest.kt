@@ -57,6 +57,24 @@ class WeaponCatalogTest {
     }
 
     @Test
+    fun `napalm inflicts a fire-flavored damage-over-time`() {
+        assertEquals(0.10f, WeaponCatalog.NAPALM.dotFraction, 0.001f)
+        assertEquals(4, WeaponCatalog.NAPALM.dotRounds)
+        assert(WeaponCatalog.NAPALM.dotIsFire)
+    }
+
+    @Test
+    fun `nuke's damage-over-time has no fire animation - it's radiation, not burning`() {
+        assertEquals(false, WeaponCatalog.NUKE.dotIsFire)
+    }
+
+    @Test
+    fun `widowmaker hits harder than every other single-shot (non-splitting, non-DoT) weapon`() {
+        val singleShotWeapons = WeaponCatalog.all.filter { it.childCount == 1 && it.dotRounds == 0 }
+        assertEquals(WeaponCatalog.WIDOWMAKER, singleShotWeapons.maxBy { it.maxDamage })
+    }
+
+    @Test
     fun `big bertha has a larger blast radius than standard shell`() {
         assert(WeaponCatalog.BIG_BERTHA.blastRadius > WeaponCatalog.STANDARD_SHELL.blastRadius)
     }

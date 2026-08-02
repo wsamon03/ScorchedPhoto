@@ -191,8 +191,11 @@ class GameLoopThread(
         if (pendingFireElapsed == null) {
             soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
         }
-        val burningTankIds = if (engine.tanks.any { it.burning }) {
-            engine.tanks.filter { it.burning }.mapTo(mutableSetOf()) { it.id }
+        // Union of the death-sequence burn (Tank.burning) and a still-alive tank's Napalm DoT
+        // fire (Tank.dotBurning) - both read as "this tank is on fire" for sound purposes,
+        // sharing the same crackling loop.
+        val burningTankIds = if (engine.tanks.any { it.burning || it.dotBurning }) {
+            engine.tanks.filter { it.burning || it.dotBurning }.mapTo(mutableSetOf()) { it.id }
         } else {
             emptySet()
         }

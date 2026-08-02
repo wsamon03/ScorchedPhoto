@@ -64,6 +64,15 @@ data class Tank(
     // stacks with an already-pending one - see GameEngine.resolveImpact.
     var dotRoundsRemaining: Int = 0,
     var dotDamagePerRound: Int = 0,
+    // True for as long as dotRoundsRemaining > 0 from a fire-flavored DoT weapon (Napalm - see
+    // Weapon.dotIsFire) - unlike burning above, this is a still-alive tank's ongoing visual/
+    // sound state, not part of the death sequence, so it's deliberately a separate field: it
+    // can span many rounds (not a fixed 2-second animation, so it has no elapsed-seconds
+    // counterpart here - GameRenderer animates its fire frames off a wall-clock timer instead,
+    // the same way it already does for other match-duration effects like water waves), and it
+    // must never affect GameEngine.deathAnimationsDone's round-progression gate the way
+    // Tank.burning does. See GameEngine.applyPendingDotDamage/resolveImpact.
+    var dotBurning: Boolean = false,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {
