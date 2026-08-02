@@ -48,6 +48,10 @@ class GameViewModel @Inject constructor(
     val skyLook: SkyLook
     val terrainColor: Int
 
+    // Fixed for the whole match (a tank's isCpu never changes mid-match) - lets GameScreen skip
+    // the pass-device screen entirely when there's nobody to actually pass the device to.
+    val humanTankCount: Int
+
     /** HUD -> engine intents, drained exclusively by [GameLoopThread]. */
     val commandQueue = ConcurrentLinkedQueue<GameCommand>()
 
@@ -79,6 +83,7 @@ class GameViewModel @Inject constructor(
         photoUsageMode = matchConfig.photoUsageMode
         skyLook = matchConfig.skyLook
         terrainColor = matchConfig.terrainColor
+        humanTankCount = matchConfig.tankConfigs.count { !it.isCpu }
 
         // Freshly time-seeded (not a fixed/injected Random) so tanks land somewhere new
         // each time this ViewModel is constructed - including "Rematch", which navigates

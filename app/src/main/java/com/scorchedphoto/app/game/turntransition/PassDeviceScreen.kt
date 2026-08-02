@@ -13,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-// TODO(Phase 9): shown only between turns of different human players; skipped for CPU/consecutive-same-human turns.
 @Composable
 fun PassDeviceScreen(nextPlayerName: String, onReady: () -> Unit) {
     Scaffold { padding ->

@@ -75,7 +75,7 @@ object WeaponCatalog {
         displayName = "Earthmover",
         blastRadius = 40f,
         maxDamage = 0,
-        ammoLimit = 3,
+        ammoLimit = 2,
         terrainEffect = TerrainEffect.FILL,
     )
 
@@ -109,7 +109,7 @@ object WeaponCatalog {
         displayName = "Flak Burst",
         blastRadius = 9f,
         maxDamage = 8,
-        ammoLimit = 3,
+        ammoLimit = 4,
         childCount = 9,
         childSpreadDegrees = 70f,
         splitPattern = SplitPattern.RADIAL_FAN,

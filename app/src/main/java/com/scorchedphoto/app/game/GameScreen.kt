@@ -72,7 +72,8 @@ fun GameScreen(onMatchOver: () -> Unit, viewModel: GameViewModel = hiltViewModel
         // Shown once per new human tank's turn (never for CPU turns) so the outgoing
         // player doesn't see the incoming player's aim setup mid-transition.
         var acknowledgedTankId by remember { mutableStateOf<Int?>(null) }
-        val needsPassDevice = uiState.phase == MatchPhase.AIMING &&
+        val needsPassDevice = viewModel.humanTankCount > 1 &&
+            uiState.phase == MatchPhase.AIMING &&
             !uiState.currentTankIsCpu &&
             uiState.currentTankId != null &&
             uiState.currentTankId != acknowledgedTankId
