@@ -33,11 +33,19 @@ object CraterCarver {
 
     private const val MAX_DEPTH_FRACTION = 0.95f
 
+    // Mirrors MAX_DEPTH_FRACTION, but from the top of the map - a thin strip of sky always
+    // survives above a mound raised by fill(), the same way a thin strip of ground always
+    // survives below a crater carved by carve().
+    private const val MIN_FILL_FRACTION = 0.05f
+
     /** The default floor clamp - a thin strip of terrain always survives at the very bottom
      * of the map. Callers that want a floor type to allow a blast to fully hollow a column
      * down to the map's true bottom (e.g. GameEngine.floorMaxGroundY for any FloorType other
      * than GROUND/WATER/LAVA) pass their own [carve] `maxGroundY` instead of this default. */
     fun defaultMaxGroundY(terrain: HeightMap): Int = (terrain.height * MAX_DEPTH_FRACTION).roundToInt()
+
+    /** The default ceiling clamp for [fill] - a mound can never rise past this row. */
+    fun defaultMinGroundY(terrain: HeightMap): Int = (terrain.height * MIN_FILL_FRACTION).roundToInt()
 
     fun carve(terrain: HeightMap, impactX: Int, impactY: Int, radius: Int, maxGroundY: Int = defaultMaxGroundY(terrain)) {
         if (radius <= 0) return
@@ -76,6 +84,48 @@ object CraterCarver {
             // less-restricted explosion already dug past that cap) - without it, coerceAtMost
             // alone could pull an already-deeper column back up to the tighter bound.
             val clampedGroundY = newGroundY.coerceAtMost(maxGroundY).coerceAtLeast(existingGroundY)
+            if (clampedGroundY != existingGroundY) {
+                terrain.groundY[x] = clampedGroundY
+                changed = true
+            }
+        }
+        if (changed) terrain.version++
+    }
+
+    /**
+     * The mirror image of [carve]: raises a mound of terrain into a [HeightMap] in place, one
+     * column at a time, using the same single-clamp geometry with every direction flipped -
+     * see [carve]'s own doc for the shared reasoning. `groundY[x]` only ever moves to
+     * somewhere between its own current value (the mound doesn't reach this column) and that
+     * value minus the mound's own full height there (this column sits under the mound's own
+     * peak). Only ever raises solidity (`groundY` only decreases, never increases) and clamps
+     * to a minimum row (see [minGroundY], defaulting to [defaultMinGroundY] - a thin strip of
+     * sky always survives) so a mound can never rise all the way to the top of the frame.
+     */
+    fun fill(terrain: HeightMap, impactX: Int, impactY: Int, radius: Int, minGroundY: Int = defaultMinGroundY(terrain)) {
+        if (radius <= 0) return
+        val minColumn = max(0, impactX - radius)
+        val maxColumn = min(terrain.width - 1, impactX + radius)
+        var changed = false
+
+        for (x in minColumn..maxColumn) {
+            val dx = x - impactX
+            val remainingSquared = radius * radius - dx * dx
+            if (remainingSquared < 0) continue
+            val moundHeight = sqrt(remainingSquared.toFloat())
+            val explosionTopY = (impactY - moundHeight).roundToInt()
+            val existingGroundY = terrain.groundY[x]
+
+            // The mound's full vertical extent at this column (top to bottom of the circle) -
+            // the most this column's surface can possibly rise by.
+            val holeHeight = (2f * moundHeight).roundToInt()
+
+            val newGroundY = explosionTopY.coerceIn(existingGroundY - holeHeight, existingGroundY)
+
+            // coerceAtMost(existingGroundY) mirrors carve()'s own coerceAtLeast guard: protects
+            // the "never lowers terrain" invariant against a caller-supplied minGroundY that's
+            // looser than a column's already-raised height.
+            val clampedGroundY = newGroundY.coerceAtLeast(minGroundY).coerceAtMost(existingGroundY)
             if (clampedGroundY != existingGroundY) {
                 terrain.groundY[x] = clampedGroundY
                 changed = true

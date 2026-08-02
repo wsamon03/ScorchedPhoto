@@ -1,6 +1,8 @@
 package com.scorchedphoto.engine
 
 import com.scorchedphoto.engine.combat.DamageCalculator
+import com.scorchedphoto.engine.combat.SplitPattern
+import com.scorchedphoto.engine.combat.TerrainEffect
 import com.scorchedphoto.engine.combat.Weapon
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
@@ -236,7 +238,12 @@ class GameEngine(
             stepProjectile(p, wind, dt)
 
             if (p.weapon.childCount > 1 && !wasPastApex && p.hasPassedApex) {
-                (spawned ?: mutableListOf<Projectile>().also { spawned = it }) += splitMirv(p)
+                val children = when (p.weapon.splitPattern) {
+                    SplitPattern.RADIAL_FAN -> splitMirv(p)
+                    SplitPattern.HORIZONTAL_LINE -> splitHorizontalLine(p)
+                    SplitPattern.NONE -> listOf(p) // unreachable - childCount > 1 always sets a real pattern
+                }
+                (spawned ?: mutableListOf<Projectile>().also { spawned = it }) += children
                 iterator.remove()
                 continue
             }
@@ -464,9 +471,21 @@ class GameEngine(
      * source, since a shell landing and a tank's own death blast sound different.
      */
     private fun resolveImpact(weapon: Weapon, impactX: Float, impactY: Float) {
-        CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt(), floorMaxGroundY())
+        when (weapon.terrainEffect) {
+            TerrainEffect.CARVE -> {
+                CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt(), floorMaxGroundY())
+                maybeSeedFloorRegion(impactX, impactY, weapon.blastRadius)
+            }
+            // A mound can never reach terrain.height, so it never seeds a Void/Lava region -
+            // and it skips raising terrain at all if it would land inside an already-open one,
+            // since nothing else in the engine ever un-collapses a tracked FloorRegion.
+            TerrainEffect.FILL -> {
+                if (!withinActiveFloorRegion(impactX, weapon.blastRadius)) {
+                    CraterCarver.fill(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt())
+                }
+            }
+        }
         activeImpactEffects += ImpactEffect(impactX, impactY, weapon.blastRadius)
-        maybeSeedFloorRegion(impactX, impactY, weapon.blastRadius)
         for (tank in tanks) {
             if (!tank.alive) continue
             val damage = DamageCalculator.computeDamage(weapon, impactX, impactY, tank)
@@ -481,10 +500,26 @@ class GameEngine(
                     tank.health = (tank.health - damage).coerceAtLeast(0)
                     if (tank.health == 0) {
                         killOrDrown(tank)
+                    } else if (weapon.dotRounds > 0) {
+                        // Overwrites rather than stacks with an already-pending effect - see
+                        // Tank.dotRoundsRemaining's own doc.
+                        tank.dotRoundsRemaining = weapon.dotRounds
+                        tank.dotDamagePerRound = DamageCalculator.percentOfMaxHealth(weapon.dotFraction)
                     }
                 }
             }
         }
+    }
+
+    /** Whether ([impactX], [impactX] + [blastRadius]) reaches into any already-open Void/Lava
+     * [FloorRegion] - see [resolveImpact]'s [TerrainEffect.FILL] branch, the only caller. */
+    private fun withinActiveFloorRegion(impactX: Float, blastRadius: Float): Boolean {
+        val regions = when (floorType) {
+            FloorType.VOID -> activeVoidRegions
+            FloorType.LAVA -> activeLavaRegions
+            else -> return false
+        }
+        return regions.any { abs(impactX - it.centerX) <= it.radius + blastRadius }
     }
 
     /** Marks [tank] dead and queues its death animation - see [Tank.pendingBurn] - and
@@ -634,6 +669,19 @@ class GameEngine(
         if (tank.health == 0) killOrDrown(tank)
     }
 
+    /** Weapon-inflicted damage-over-time (Nuke/Napalm - see [Tank.dotRoundsRemaining]'s own
+     * doc and [resolveImpact]'s [Weapon.dotRounds] handling) - called once per completed round
+     * from [finishResolution], the same boundary [processFloorRound] fires at, but independent
+     * of [floorType] since this is weapon-driven, not floor-driven. */
+    private fun applyPendingDotDamage() {
+        for (tank in tanks) {
+            if (!tank.alive || tank.dotRoundsRemaining <= 0) continue
+            tank.health = (tank.health - tank.dotDamagePerRound).coerceAtLeast(0)
+            tank.dotRoundsRemaining--
+            if (tank.health == 0) killOrDrown(tank)
+        }
+    }
+
     /** [FloorType.HOLE]/[FloorType.WRAP]/[FloorType.VOID] only: a tank that settles onto a
      * fully-open column (see [applyTankGravity]) dies instantly, with none of the ordinary
      * burn/explosion/ash sequence - there's no ground left for one to play out on. The only
@@ -720,7 +768,7 @@ class GameEngine(
 
     private fun splitMirv(parent: Projectile): List<Projectile> {
         val weapon = parent.weapon
-        val childWeapon = weapon.copy(childCount = 1, childSpreadDegrees = 0f)
+        val childWeapon = weapon.copy(childCount = 1, childSpreadDegrees = 0f, splitPattern = SplitPattern.NONE)
         val speed = hypot(parent.vx.toDouble(), parent.vy.toDouble())
         val baseAngle = kotlin.math.atan2(parent.vy.toDouble(), parent.vx.toDouble())
         val spreadRad = Math.toRadians(weapon.childSpreadDegrees.toDouble())
@@ -733,6 +781,30 @@ class GameEngine(
                 y = parent.y,
                 vx = (kotlin.math.cos(angle) * speed).toFloat(),
                 vy = (kotlin.math.sin(angle) * speed).toFloat(),
+                weapon = childWeapon,
+                ownerTankId = parent.ownerTankId,
+                hasPassedApex = true,
+            )
+        }
+    }
+
+    /** Spread MIRV's split geometry: unlike [splitMirv]'s radial fan (centered on the parent's
+     * current heading), this always spreads horizontally - every child keeps the parent's own
+     * `vy` unchanged (so they all still fall in roughly the same time window) and only offsets
+     * `vx` in fixed [Weapon.horizontalSpreadSpeed] steps around the parent's own `vx`. With 5
+     * children this gives exactly 2 short (behind), 1 unchanged (the parent's own original
+     * path), and 2 long (ahead) - a wide horizontal line rather than a fan. */
+    private fun splitHorizontalLine(parent: Projectile): List<Projectile> {
+        val weapon = parent.weapon
+        val childWeapon = weapon.copy(childCount = 1, splitPattern = SplitPattern.NONE)
+        val half = weapon.childCount / 2
+
+        return (-half..half).map { step ->
+            Projectile(
+                x = parent.x,
+                y = parent.y,
+                vx = parent.vx + step * weapon.horizontalSpreadSpeed,
+                vy = parent.vy,
                 weapon = childWeapon,
                 ownerTankId = parent.ownerTankId,
                 hasPassedApex = true,
@@ -885,20 +957,23 @@ class GameEngine(
         activeBounceEffects.removeAll { it.age > BOUNCE_EFFECT_LIFETIME_SECONDS }
     }
 
-    /** A round (see [processFloorRound]) is checked for and processed *before* the win check,
-     * not after - so a Water/Lava round that eliminates the last standing side can end the
-     * match on this same turn, instead of leaving it stalled one turn behind. Guarded by
-     * [awaitingRoundAnimations] so that increment/`processFloorRound()` only ever actually runs
-     * once per round boundary, even though this function can now be re-entered several times in
-     * a row while a round-boundary kill's own death animation (Water's drowning, Lava's damage)
-     * plays out - `processFloorRound()` can itself just have started a brand-new one on a tank
-     * `tick()`'s own pre-call [deathAnimationsDone] check had no way to know about yet, so the
-     * turn can't advance/a win can't be declared until that finishes too. */
+    /** A round (see [processFloorRound]/[applyPendingDotDamage]) is checked for and processed
+     * *before* the win check, not after - so a Water/Lava round (or a Nuke/Napalm DoT tick)
+     * that eliminates the last standing side can end the match on this same turn, instead of
+     * leaving it stalled one turn behind. Guarded by [awaitingRoundAnimations] so that
+     * increment/`processFloorRound()`/`applyPendingDotDamage()` only ever actually run once per
+     * round boundary, even though this function can now be re-entered several times in a row
+     * while a round-boundary kill's own death animation (Water's drowning, Lava's damage, a DoT
+     * tick) plays out - `processFloorRound()`/`applyPendingDotDamage()` can themselves just have
+     * started a brand-new one on a tank `tick()`'s own pre-call [deathAnimationsDone] check had
+     * no way to know about yet, so the turn can't advance/a win can't be declared until that
+     * finishes too. */
     private fun finishResolution() {
         if (!awaitingRoundAnimations) {
             turnsCompletedThisRound++
             if (turnsCompletedThisRound >= tanksAliveAtRoundStart) {
                 processFloorRound()
+                applyPendingDotDamage()
                 turnsCompletedThisRound = 0
                 tanksAliveAtRoundStart = tanks.count { it.alive }
             }

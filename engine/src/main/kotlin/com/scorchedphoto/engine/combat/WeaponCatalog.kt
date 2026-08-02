@@ -20,14 +20,15 @@ object WeaponCatalog {
         ammoLimit = 1,
     )
 
-    val MIRV = Weapon(
-        type = WeaponType.MIRV,
-        displayName = "MIRV",
+    val CLUSTER_MIRV = Weapon(
+        type = WeaponType.CLUSTER_MIRV,
+        displayName = "Cluster MIRV",
         blastRadius = 26f,
         maxDamage = 30,
         ammoLimit = 1,
         childCount = 4,
         childSpreadDegrees = 40f,
+        splitPattern = SplitPattern.RADIAL_FAN,
     )
 
     val BABY_MISSILE = Weapon(
@@ -36,6 +37,82 @@ object WeaponCatalog {
         blastRadius = 14f,
         maxDamage = 15,
         ammoLimit = null,
+    )
+
+    /** Splits into 5 children in a straight horizontal line rather than a radial fan (see
+     * [com.scorchedphoto.engine.GameEngine.splitHorizontalLine]) - 2 fall short, 1 continues
+     * on the original path, 2 fly long, blanketing a wide swath of ground in one shot. */
+    val SPREAD_MIRV = Weapon(
+        type = WeaponType.SPREAD_MIRV,
+        displayName = "Spread MIRV",
+        blastRadius = 22f,
+        maxDamage = 24,
+        ammoLimit = 1,
+        childCount = 5,
+        splitPattern = SplitPattern.HORIZONTAL_LINE,
+        horizontalSpreadSpeed = 90f,
+    )
+
+    /** The ultimate weapon: a blast 4x Big Bertha's own radius, plus lingering radiation -
+     * any tank it damages but doesn't outright kill takes another 10% of its max health at
+     * the start of each of the next 3 rounds (see [com.scorchedphoto.engine.GameEngine.applyPendingDotDamage]). */
+    val NUKE = Weapon(
+        type = WeaponType.NUKE,
+        displayName = "Nuke",
+        blastRadius = BIG_BERTHA.blastRadius * 4f,
+        maxDamage = 80,
+        ammoLimit = 1,
+        dotFraction = 0.10f,
+        dotRounds = 3,
+    )
+
+    /** A defensive/utility weapon: raises a mound of terrain instead of carving a crater (see
+     * [com.scorchedphoto.engine.terrain.CraterCarver.fill]) - can bury an enemy tank or shore
+     * up cover, but deals no direct damage. Not offensive, so [com.scorchedphoto.engine.ai.CpuWeaponSelector]
+     * never picks it. */
+    val EARTHMOVER = Weapon(
+        type = WeaponType.EARTHMOVER,
+        displayName = "Earthmover",
+        blastRadius = 40f,
+        maxDamage = 0,
+        ammoLimit = 3,
+        terrainEffect = TerrainEffect.FILL,
+    )
+
+    /** A moderate blast that sets survivors burning - 5% of max health at the start of each
+     * of the next 2 rounds, reusing the exact same lingering-damage mechanism as [NUKE]. */
+    val NAPALM = Weapon(
+        type = WeaponType.NAPALM,
+        displayName = "Napalm",
+        blastRadius = 32f,
+        maxDamage = 25,
+        ammoLimit = 2,
+        dotFraction = 0.05f,
+        dotRounds = 2,
+    )
+
+    /** A precise, heavy single-target round: a small blast radius keeps collateral damage
+     * low while still hitting nearly as hard as Big Bertha. */
+    val WIDOWMAKER = Weapon(
+        type = WeaponType.WIDOWMAKER,
+        displayName = "Widowmaker",
+        blastRadius = 10f,
+        maxDamage = 45,
+        ammoLimit = 2,
+    )
+
+    /** A wide, tight radial spray of many weak pellets (see [com.scorchedphoto.engine.GameEngine.splitMirv],
+     * the same radial-fan geometry [CLUSTER_MIRV] uses, just more/weaker children over a
+     * wider arc) - forgiving of imprecise aim, but no single pellet does much on its own. */
+    val FLAK_BURST = Weapon(
+        type = WeaponType.FLAK_BURST,
+        displayName = "Flak Burst",
+        blastRadius = 9f,
+        maxDamage = 8,
+        ammoLimit = 3,
+        childCount = 9,
+        childSpreadDegrees = 70f,
+        splitPattern = SplitPattern.RADIAL_FAN,
     )
 
     /** A dying tank's own final blast - see [com.scorchedphoto.engine.GameEngine]'s death
@@ -49,7 +126,10 @@ object WeaponCatalog {
         maxDamage = 50,
     )
 
-    val all: List<Weapon> = listOf(STANDARD_SHELL, BIG_BERTHA, MIRV, BABY_MISSILE)
+    val all: List<Weapon> = listOf(
+        STANDARD_SHELL, BIG_BERTHA, CLUSTER_MIRV, BABY_MISSILE,
+        SPREAD_MIRV, NUKE, EARTHMOVER, NAPALM, WIDOWMAKER, FLAK_BURST,
+    )
 
     fun byType(type: WeaponType): Weapon = all.first { it.type == type }
 }

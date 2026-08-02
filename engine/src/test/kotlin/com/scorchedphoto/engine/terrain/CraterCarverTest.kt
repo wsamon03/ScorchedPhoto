@@ -129,4 +129,84 @@ class CraterCarverTest {
 
         assertEquals(150, terrain.groundY[10])
     }
+
+    // --- fill(): the mirror-image operation Earthmover uses ------------------------------------
+
+    @Test
+    fun `fill raises a semicircular mound profile centered on the impact column`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 100)
+        CraterCarver.fill(terrain, impactX = 50, impactY = 100, radius = 20)
+
+        assertEquals(80, terrain.groundY[50]) // full mound height directly under impact
+        val expectedAt10Away = 100 - sqrt((20 * 20 - 10 * 10).toDouble()).roundToInt()
+        assertEquals(expectedAt10Away, terrain.groundY[60])
+        // Outside the radius, terrain is untouched.
+        assertEquals(100, terrain.groundY[75])
+    }
+
+    @Test
+    fun `fill never lowers terrain, only raises it`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 50)
+        val before = terrain.groundY.copyOf()
+        // Fill somewhere already deep underground (well below groundY) - should have no effect.
+        CraterCarver.fill(terrain, impactX = 50, impactY = 190, radius = 5)
+        for (x in terrain.groundY.indices) {
+            assertTrue(terrain.groundY[x] <= before[x])
+        }
+    }
+
+    @Test
+    fun `repeated fills accumulate without ever lowering terrain`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 150)
+        CraterCarver.fill(terrain, impactX = 50, impactY = 150, radius = 15)
+        val afterFirst = terrain.groundY.copyOf()
+        CraterCarver.fill(terrain, impactX = 52, impactY = 150, radius = 15)
+        for (x in terrain.groundY.indices) {
+            assertTrue(terrain.groundY[x] <= afterFirst[x])
+        }
+    }
+
+    @Test
+    fun `fill height is clamped to the min-height ceiling`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 100)
+        CraterCarver.fill(terrain, impactX = 50, impactY = 10, radius = 60)
+        val ceilingMin = (200 * 0.05f).roundToInt()
+        assertTrue(terrain.groundY.all { it >= ceilingMin })
+    }
+
+    @Test
+    fun `mound near the edge of the map does not throw`() {
+        val terrain = flatTerrain(width = 100, height = 200, groundY = 100)
+        CraterCarver.fill(terrain, impactX = 0, impactY = 100, radius = 30)
+        CraterCarver.fill(terrain, impactX = 99, impactY = 100, radius = 30)
+        assertTrue(terrain.groundY.all { it in 0 until 200 })
+    }
+
+    @Test
+    fun `fill with zero or negative radius is a no-op`() {
+        val terrain = flatTerrain(width = 20, height = 50, groundY = 25)
+        val before = terrain.groundY.copyOf()
+        CraterCarver.fill(terrain, impactX = 10, impactY = 25, radius = 0)
+        CraterCarver.fill(terrain, impactX = 10, impactY = 25, radius = -5)
+        assertEquals(before.toList(), terrain.groundY.toList())
+    }
+
+    @Test
+    fun `an explicit minGroundY of 0 lets a mound rise to the very top of the map`() {
+        val terrain = flatTerrain(width = 20, height = 200, groundY = 100)
+        CraterCarver.fill(terrain, impactX = 5, impactY = 10, radius = 60, minGroundY = 0)
+
+        assertEquals(0, terrain.groundY[5])
+    }
+
+    @Test
+    fun `a minGroundY looser than a column's already-raised height never lowers it back down`() {
+        // Simulates a second, less-restricted fill() call landing on a column an earlier call
+        // already raised past a tighter cap - the looser bound here (80) must not pull the
+        // column's already-higher surface (50) back down to it.
+        val terrain = flatTerrain(width = 20, height = 200, groundY = 50)
+        CraterCarver.fill(terrain, impactX = 10, impactY = 10, radius = 30, minGroundY = 80)
+
+        assertEquals(50, terrain.groundY[10])
+    }
 }

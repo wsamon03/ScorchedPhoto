@@ -57,6 +57,13 @@ data class Tank(
     // draws this tank upside-down at the live water surface from then on, tracking it as it
     // keeps rising (see GameEngine.updateRisingTanks), the drowning equivalent of isAsh.
     var isDrowned: Boolean = false,
+    // A weapon like Nuke/Napalm's lingering damage-over-time - see GameEngine.applyPendingDotDamage,
+    // which decrements dotRoundsRemaining and applies dotDamagePerRound at each round boundary
+    // until it hits 0. Turn-counted rather than the elapsed-seconds pattern the fields above use,
+    // since this ticks once per round, not once per frame. A later hit overwrites rather than
+    // stacks with an already-pending one - see GameEngine.resolveImpact.
+    var dotRoundsRemaining: Int = 0,
+    var dotDamagePerRound: Int = 0,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {

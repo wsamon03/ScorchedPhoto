@@ -16,7 +16,7 @@ class WeaponCatalogTest {
 
     @Test
     fun `byType returns the matching weapon`() {
-        assertEquals(WeaponCatalog.MIRV, WeaponCatalog.byType(WeaponType.MIRV))
+        assertEquals(WeaponCatalog.CLUSTER_MIRV, WeaponCatalog.byType(WeaponType.CLUSTER_MIRV))
     }
 
     @Test
@@ -25,15 +25,35 @@ class WeaponCatalogTest {
     }
 
     @Test
-    fun `standard shell, big bertha and MIRV have limited starting ammo`() {
+    fun `standard shell, big bertha and cluster MIRV have limited starting ammo`() {
         assertEquals(5, WeaponCatalog.STANDARD_SHELL.ammoLimit)
         assertEquals(1, WeaponCatalog.BIG_BERTHA.ammoLimit)
-        assertEquals(1, WeaponCatalog.MIRV.ammoLimit)
+        assertEquals(1, WeaponCatalog.CLUSTER_MIRV.ammoLimit)
     }
 
     @Test
-    fun `MIRV splits into multiple children`() {
-        assertEquals(4, WeaponCatalog.MIRV.childCount)
+    fun `cluster MIRV splits radially into multiple children`() {
+        assertEquals(4, WeaponCatalog.CLUSTER_MIRV.childCount)
+        assertEquals(SplitPattern.RADIAL_FAN, WeaponCatalog.CLUSTER_MIRV.splitPattern)
+    }
+
+    @Test
+    fun `spread MIRV splits into a horizontal line of 5 children`() {
+        assertEquals(5, WeaponCatalog.SPREAD_MIRV.childCount)
+        assertEquals(SplitPattern.HORIZONTAL_LINE, WeaponCatalog.SPREAD_MIRV.splitPattern)
+    }
+
+    @Test
+    fun `nuke has a blast radius 4x big bertha's and inflicts damage-over-time`() {
+        assertEquals(WeaponCatalog.BIG_BERTHA.blastRadius * 4f, WeaponCatalog.NUKE.blastRadius, 0.001f)
+        assert(WeaponCatalog.NUKE.dotFraction > 0f)
+        assert(WeaponCatalog.NUKE.dotRounds > 0)
+    }
+
+    @Test
+    fun `earthmover fills terrain instead of carving it, and deals no damage`() {
+        assertEquals(TerrainEffect.FILL, WeaponCatalog.EARTHMOVER.terrainEffect)
+        assertEquals(0, WeaponCatalog.EARTHMOVER.maxDamage)
     }
 
     @Test

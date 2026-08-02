@@ -28,8 +28,14 @@ import com.scorchedphoto.engine.combat.WeaponType
 private fun WeaponType.displayName(): String = when (this) {
     WeaponType.STANDARD_SHELL -> "Shell"
     WeaponType.BIG_BERTHA -> "Bertha"
-    WeaponType.MIRV -> "MIRV"
+    WeaponType.CLUSTER_MIRV -> "Cluster"
     WeaponType.BABY_MISSILE -> "Baby"
+    WeaponType.SPREAD_MIRV -> "Spread"
+    WeaponType.NUKE -> "Nuke"
+    WeaponType.EARTHMOVER -> "Dirt"
+    WeaponType.NAPALM -> "Napalm"
+    WeaponType.WIDOWMAKER -> "Sniper"
+    WeaponType.FLAK_BURST -> "Flak"
     // Never actually reaches this picker - WeaponCatalog.all excludes it (a tank's own
     // death blast, not a player-selectable weapon) - see WeaponCatalog.TANK_DEATH_EXPLOSION.
     WeaponType.TANK_EXPLOSION -> "Explosion"
