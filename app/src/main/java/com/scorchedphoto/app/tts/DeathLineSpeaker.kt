@@ -3,11 +3,13 @@ package com.scorchedphoto.app.tts
 import android.content.Context
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import com.scorchedphoto.app.settings.AudioSettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -59,6 +61,20 @@ class DeathLineSpeaker @Inject constructor(
      * [VoiceOption.SYSTEM_DEFAULT] and updates once the async engine init completes. */
     val availableVoices: StateFlow<List<VoiceOption>> = _availableVoices.asStateFlow()
 
+    // Counts utterances currently between onStart and onDone/onError, so isSpeaking stays
+    // true across an in-game moment where two tanks' lines briefly overlap in the queue -
+    // only the last one finishing should flip it back to false. Updated from whichever
+    // thread the TTS engine calls the listener back on (its own internal thread, not
+    // speechExecutor), so a plain Int would race; StateFlow.value writes are their own
+    // synchronization point, but the increment/decrement itself still needs to be atomic.
+    private val activeUtteranceCount = AtomicInteger(0)
+    private val _isSpeaking = MutableStateFlow(false)
+
+    /** True while any queued line (a death/pre-fire taunt, or a setup-screen voice test) is
+     * actively being spoken - see [GameSetupViewModel.isTestingVoice], which uses this to
+     * grey out every "Test" button while one is in progress. */
+    val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
+
     private val tts: TextToSpeech = TextToSpeech(context) { status ->
         synchronized(lock) {
             ready = status == TextToSpeech.SUCCESS
@@ -71,6 +87,24 @@ class DeathLineSpeaker @Inject constructor(
                 pending.clear()
             }
         }
+    }.apply {
+        setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                activeUtteranceCount.incrementAndGet()
+                _isSpeaking.value = true
+            }
+
+            override fun onDone(utteranceId: String?) {
+                if (activeUtteranceCount.decrementAndGet() <= 0) _isSpeaking.value = false
+            }
+
+            // The single-arg overload is deprecated in favor of onError(String, int), but it's
+            // still abstract on UtteranceProgressListener itself, so it must be implemented.
+            @Suppress("OVERRIDE_DEPRECATION")
+            override fun onError(utteranceId: String?) {
+                if (activeUtteranceCount.decrementAndGet() <= 0) _isSpeaking.value = false
+            }
+        })
     }
 
     init {

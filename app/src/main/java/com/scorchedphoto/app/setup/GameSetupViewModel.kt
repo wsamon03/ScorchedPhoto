@@ -66,6 +66,11 @@ class GameSetupViewModel @Inject constructor(
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** True while a "Test" voice line is actively being spoken - every tank row's Test
+     * button is disabled while this is true (see GameSetupScreen), so overlapping test
+     * requests can't queue up and play back-to-back for the wrong tank's voice settings. */
+    val isTestingVoice: StateFlow<Boolean> = deathLineSpeaker.isSpeaking
+
     val canAddTank: Boolean get() = _tankConfigs.value.size < MAX_TANKS
     val canRemoveTank: Boolean get() = _tankConfigs.value.size > MIN_TANKS
 

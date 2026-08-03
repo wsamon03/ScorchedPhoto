@@ -64,6 +64,15 @@ class GameLoopThread(
     private var pendingSpeechText: String? = null
     private var pendingSpeechElapsed: Float? = null
 
+    // Seconds since engine.currentTank last changed - drives the Napalm DoT fire-crackle
+    // sound's turn-based gating in updateSound (see its own doc): unlike the fire *animation*,
+    // which keeps playing on every dotBurning tank for as long as Tank.dotBurning is true, the
+    // *sound* only plays for that tank's own whole turn, then bleeds DOT_BURN_SOUND_OTHER_TURN_SECONDS
+    // into whoever's turn comes next before falling silent until it's the burning tank's turn
+    // again. Distinct from the death-sequence burn's own sound, which stays ungated by turn.
+    private var soundTurnTrackedTankId: Int? = null
+    private var soundTurnElapsedSeconds = 0f
+
     override fun run() {
         var accumulator = 0f
         var lastNanos = System.nanoTime()
@@ -101,7 +110,7 @@ class GameLoopThread(
             val tickMs = (System.nanoTime() - tickStartNanos) / 1_000_000f
 
             val soundStartNanos = System.nanoTime()
-            updateSound()
+            updateSound(frameDeltaSeconds)
             val soundMs = (System.nanoTime() - soundStartNanos) / 1_000_000f
 
             // TEMP DIAGNOSTIC - split out so a spike here (waiting on the display compositor,
@@ -174,7 +183,7 @@ class GameLoopThread(
     /** Forwards this frame's engine events to one-shot sounds, and drives the two
      * continuous sounds (whistle, per-tank fire loop) off live engine state - see
      * [GameSoundController]. */
-    private fun updateSound() {
+    private fun updateSound(dt: Float) {
         for (event in engine.drainEvents()) {
             when (event) {
                 // Already played eagerly in beginFire(), ahead of the projectile actually
@@ -191,11 +200,22 @@ class GameLoopThread(
         if (pendingFireElapsed == null) {
             soundController.updateWhistle(engine.projectiles.firstOrNull()?.vy)
         }
-        // Union of the death-sequence burn (Tank.burning) and a still-alive tank's Napalm DoT
-        // fire (Tank.dotBurning) - both read as "this tank is on fire" for sound purposes,
-        // sharing the same crackling loop.
+        val currentTankId = engine.currentTank?.id
+        if (currentTankId != soundTurnTrackedTankId) {
+            soundTurnTrackedTankId = currentTankId
+            soundTurnElapsedSeconds = 0f
+        } else {
+            soundTurnElapsedSeconds += dt
+        }
+        // The death-sequence burn (Tank.burning) plays unconditionally, same as always. A
+        // still-alive tank's Napalm DoT fire (Tank.dotBurning) is turn-gated instead - see
+        // soundTurnTrackedTankId's own doc - even though its fire *animation* keeps playing
+        // the whole time regardless of whose turn it is (GameRenderer.drawDotBurningTank).
         val burningTankIds = if (engine.tanks.any { it.burning || it.dotBurning }) {
-            engine.tanks.filter { it.burning || it.dotBurning }.mapTo(mutableSetOf()) { it.id }
+            engine.tanks.filter { tank ->
+                tank.burning ||
+                    (tank.dotBurning && (tank.id == currentTankId || soundTurnElapsedSeconds < DOT_BURN_SOUND_OTHER_TURN_SECONDS))
+            }.mapTo(mutableSetOf()) { it.id }
         } else {
             emptySet()
         }
@@ -341,5 +361,9 @@ class GameLoopThread(
         // stays up (GameEngine.TANK_BURNING_DURATION_SECONDS) before its closing explosion,
         // so both taunts get the same amount of time to read/play out.
         private const val FIRE_SPEECH_LEAD_SECONDS = 2f
+
+        // How far a Napalm-burning tank's fire-crackle sound bleeds into another tank's turn
+        // before falling silent - see soundTurnTrackedTankId's own doc.
+        private const val DOT_BURN_SOUND_OTHER_TURN_SECONDS = 2f
     }
 }

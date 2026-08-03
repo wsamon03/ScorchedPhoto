@@ -74,6 +74,7 @@ fun GameSetupScreen(
     val tankConfigs by viewModel.tankConfigs.collectAsStateWithLifecycle()
     val availableVoices by viewModel.availableVoices.collectAsStateWithLifecycle()
     val customVoices by viewModel.customVoices.collectAsStateWithLifecycle()
+    val isTestingVoice by viewModel.isTestingVoice.collectAsStateWithLifecycle()
     var showMoreVoicesDialog by remember { mutableStateOf(false) }
 
     Scaffold { padding ->
@@ -135,6 +136,7 @@ fun GameSetupScreen(
                         config = config,
                         availableVoices = availableVoices,
                         customVoices = customVoices,
+                        testButtonEnabled = !isTestingVoice,
                         onToggleCpu = { viewModel.toggleCpu(index) },
                         onDifficultyChange = { viewModel.setDifficulty(index, it) },
                         onShapeChange = { viewModel.setShape(index, it) },
@@ -233,6 +235,7 @@ private fun TankConfigRow(
     config: TankConfig,
     availableVoices: List<VoiceOption>,
     customVoices: List<CustomVoice>,
+    testButtonEnabled: Boolean,
     onToggleCpu: () -> Unit,
     onDifficultyChange: (Difficulty) -> Unit,
     onShapeChange: (TankShape) -> Unit,
@@ -288,7 +291,7 @@ private fun TankConfigRow(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 VoiceDropdown(selected = config.voiceId, options = listOf(VoiceOption.NONE) + availableVoices, onSelect = onVoiceChange)
-                Button(onClick = onTest) {
+                Button(onClick = onTest, enabled = testButtonEnabled) {
                     Text("Test")
                 }
                 CustomVoiceDropdown(customVoices = customVoices, onSelect = onLoadCustomVoice)
