@@ -10,9 +10,8 @@ data class Projectile(
     val weapon: Weapon,
     val ownerTankId: Int,
     var hasPassedApex: Boolean = false,
-    // Set once this projectile has bounced off the map's true bottom under a
-    // PADDED/RUBBER/SPRING/REFLECTIVE floor - see GameEngine.handleFloorEdge's own doc on why
-    // this matters specifically for Spring/Reflective (retention >= 1f, so gravity alone can
-    // never bring the bounce to rest).
-    var hasBouncedOffFloor: Boolean = false,
+    // Seconds since this projectile was fired, incremented every stepProjectile() call - see
+    // GameEngine.PROJECTILE_FUSE_SECONDS, the match-wide guarantee that every shot eventually
+    // resolves however many times it's bounced, wrapped, or otherwise kept flying.
+    var elapsedSeconds: Float = 0f,
 )

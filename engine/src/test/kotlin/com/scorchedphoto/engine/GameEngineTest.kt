@@ -570,7 +570,7 @@ class GameEngineTest {
     }
 
     @Test
-    fun `wall type Reflective bounces a projectile back at matching speed`() {
+    fun `wall type Reflective bounces a projectile back at 98 percent speed`() {
         val terrain = flatTerrain(width = 200, groundY = 500)
         val shooter = testTank(id = 1, ownerId = 1, x = 100f)
         val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, wallType = EdgeType.REFLECTIVE, rng = Random(1))
@@ -591,13 +591,14 @@ class GameEngineTest {
         assertTrue("expected the wall to reflect the projectile", bounced)
         val p = engine.projectiles.first()
         // No wind, so vx is unchanged by stepProjectile itself - the reflection is the only
-        // thing that can flip its sign, and REFLECTIVE's 1.0 retention keeps the magnitude.
-        assertEquals(-vxBeforeBounce, p.vx, 1f)
+        // thing that can flip its sign, and REFLECTIVE's 0.98 retention keeps 98% of the
+        // magnitude.
+        assertEquals(-vxBeforeBounce * 0.98f, p.vx, 1f)
         assertEquals("expected the projectile clamped exactly onto the wall (x=0)", 0f, p.x, 0.01f)
     }
 
     @Test
-    fun `ceiling type Reflective bounces a projectile back down at matching speed`() {
+    fun `ceiling type Reflective bounces a projectile back down at 98 percent speed`() {
         val terrain = flatTerrain(width = 1000, groundY = 100)
         val shooter = testTank(id = 1, ownerId = 1, x = 500f)
         val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, ceilingType = EdgeType.REFLECTIVE, rng = Random(1))
@@ -619,8 +620,9 @@ class GameEngineTest {
         val p = engine.projectiles.first()
         // Unlike vx, vy always gets one more tick's worth of gravity applied by stepProjectile
         // before the reflection check runs, so the expected post-bounce value accounts for it.
+        // REFLECTIVE's 0.98 retention keeps 98% of that magnitude.
         val vyEnteringBounceTick = vyBeforeBounce + GRAVITY * (1f / 60f)
-        assertEquals(-vyEnteringBounceTick, p.vy, 1f)
+        assertEquals(-vyEnteringBounceTick * 0.98f, p.vy, 1f)
         assertEquals("expected the projectile clamped exactly onto the ceiling (y=0)", 0f, p.y, 0.01f)
     }
 

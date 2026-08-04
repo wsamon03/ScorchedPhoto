@@ -35,6 +35,7 @@ fun stepProjectile(projectile: Projectile, wind: Wind, dt: Float) {
     projectile.vy += GRAVITY * dt
     projectile.x += projectile.vx * dt
     projectile.y += projectile.vy * dt
+    projectile.elapsedSeconds += dt
     if (wasRising && projectile.vy >= 0f) {
         projectile.hasPassedApex = true
     }

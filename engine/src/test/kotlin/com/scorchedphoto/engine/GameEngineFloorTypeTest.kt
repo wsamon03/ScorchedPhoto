@@ -14,6 +14,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -92,43 +93,118 @@ class GameEngineFloorTypeTest {
     }
 
     @Test
-    fun `floor type Reflective bounces once with full retention, then detonates on its second return instead of bouncing forever`() {
+    fun `floor type Reflective retains 98 percent speed on each bounce off the true bottom`() {
         val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
         terrain.groundY[100] = terrain.height
         val shooter = testTank(id = 1, ownerId = 1, x = 100f)
         val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.REFLECTIVE, rng = Random(1))
-        shooter.angleDeg = 270f
+        shooter.angleDeg = 270f // straight down - vx stays exactly 0 the whole flight, no wind
         shooter.power = 50f
         engine.fire()
 
-        // First bounce: same shape as the Padded test above - reflects with full speed intact
-        // and keeps flying.
+        // Between any two consecutive bounces, gravity alone conserves speed on the way up and
+        // back down again (no air resistance) - so the speed reaching the floor the *second*
+        // time equals the speed leaving it after the *first* bounce. That makes the ratio
+        // between the two bounces' own post-bounce speeds a direct, empirical measurement of
+        // this floor's own velocityRetention, without needing to reconstruct the exact
+        // analytical impact speed by hand.
+        var ticks = 0
+        var wasBounceEffectsEmpty = true
+        var firstBounceSpeed: Float? = null
+        var secondBounceSpeed: Float? = null
+        while (ticks < 400 && secondBounceSpeed == null) {
+            engine.tick(1f / 60f)
+            ticks++
+            val bounceEffectsEmptyNow = engine.bounceEffects.isEmpty()
+            if (wasBounceEffectsEmpty && !bounceEffectsEmptyNow) {
+                val speed = abs(engine.projectiles.single().vy)
+                if (firstBounceSpeed == null) firstBounceSpeed = speed else secondBounceSpeed = speed
+            }
+            wasBounceEffectsEmpty = bounceEffectsEmptyNow
+        }
+
+        assertNotNull("expected a first bounce within $ticks ticks", firstBounceSpeed)
+        assertNotNull("expected a second bounce within $ticks ticks", secondBounceSpeed)
+        assertEquals(0.98f, secondBounceSpeed!! / firstBounceSpeed!!, 0.03f)
+    }
+
+    @Test
+    fun `floor type Spring never launches weaker than 25 percent of the map's height, even from a very weak impact`() {
+        val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
+        terrain.groundY[100] = terrain.height
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.SPRING, rng = Random(1))
+        shooter.angleDeg = 270f
+        shooter.power = 1f // a very weak impact - plain 0.7x retention alone would be nearly negligible
+        engine.fire()
+
         var ticks = 0
         while (engine.bounceEffects.isEmpty() && ticks < 200) {
             engine.tick(1f / 60f)
             ticks++
         }
-        assertTrue("expected the floor to reflect the projectile", engine.bounceEffects.isNotEmpty())
-        assertTrue("expected the projectile still flying after its first bounce", engine.projectiles.isNotEmpty())
-        assertTrue(
-            "expected an upward (negative) velocity after bouncing off the floor",
-            engine.projectiles.single().vy < 0f,
-        )
 
-        // Reflective's 100% retention never loses enough speed to settle on its own - left
-        // uncapped, this exact scenario bounces forever (verified empirically before this fix)
-        // and would stall the match indefinitely. Confirms it now resolves within a bounded
-        // number of ticks instead.
-        ticks = 0
-        while (engine.projectiles.isNotEmpty() && ticks < 500) {
+        assertTrue("expected the floor to reflect the projectile", engine.bounceEffects.isNotEmpty())
+        val p = engine.projectiles.single()
+        assertTrue("expected an upward (negative) velocity after bouncing off the floor", p.vy < 0f)
+        val expectedMinSpeed = sqrt(2f * GRAVITY * 0.25f * terrain.height)
+        assertTrue(
+            "expected the enforced minimum launch speed (~$expectedMinSpeed) to kick in instead of the raw " +
+                "0.7x retention of this near-zero impact speed - got vy=${p.vy}",
+            abs(p.vy) >= expectedMinSpeed - 1f,
+        )
+    }
+
+    @Test
+    fun `floor type Spring deflects the bounce sideways by up to 2 degrees instead of bouncing along the exact same vertical line forever`() {
+        val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
+        terrain.groundY[100] = terrain.height
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.SPRING, rng = Random(1))
+        shooter.angleDeg = 270f // straight down - vx starts at exactly 0
+        shooter.power = 50f
+        engine.fire()
+
+        var ticks = 0
+        while (engine.bounceEffects.isEmpty() && ticks < 200) {
             engine.tick(1f / 60f)
             ticks++
         }
+
+        assertTrue("expected the floor to reflect the projectile", engine.bounceEffects.isNotEmpty())
+        val p = engine.projectiles.single()
+        assertTrue("expected the bounce to introduce some sideways drift, not stay perfectly vertical", p.vx != 0f)
+        val speed = hypot(p.vx.toDouble(), p.vy.toDouble()).toFloat()
+        // A small safety margin over the exact 2-degree cap, for floating-point slack.
+        val maxDeflectionVx = speed * sin(Math.toRadians(2.05)).toFloat()
         assertTrue(
-            "expected the second return to the true floor to detonate the projectile, not bounce again",
-            engine.projectiles.isEmpty(),
+            "expected the sideways drift to stay within the +-2 degree deflection cap - got vx=${p.vx}, speed=$speed",
+            abs(p.vx) <= maxDeflectionVx,
         )
-        assertTrue("expected a real explosion on the second contact", engine.impactEffects.isNotEmpty())
+    }
+
+    @Test
+    fun `a projectile that would otherwise fly forever (Wrap floor) is force-detonated by the 30 second fuse`() {
+        val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
+        terrain.groundY[100] = terrain.height
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f, health = 1000)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.WRAP, rng = Random(1))
+        engine.floorWrapDepthY = 12f
+        shooter.angleDeg = 270f
+        shooter.power = 50f
+        engine.fire()
+
+        var ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 3000) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+
+        assertTrue("expected the 30-second fuse to eventually force-detonate the projectile", engine.projectiles.isEmpty())
+        assertTrue("expected a real explosion from the fuse, not a silent removal", engine.impactEffects.isNotEmpty())
+        // 30s at 60 ticks/sec = 1800 ticks - loosely bounded to tolerate the shot's own brief
+        // travel time before it starts wrapping at all, and any float accumulation error.
+        assertTrue("expected this to take close to the full 30-second fuse, not resolve immediately via ordinary wrapping", ticks > 1500)
     }
 
     @Test

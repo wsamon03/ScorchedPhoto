@@ -22,6 +22,7 @@ import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 enum class MatchPhase { AIMING, FIRING, RESOLVING, GAME_OVER }
@@ -298,6 +299,17 @@ class GameEngine(
             val groundedThisTick = !touchedTank && p.y >= terrainY && terrainY < terrain.height
 
             when {
+                // A hard backstop, independent of whatever surface/bounce interactions this
+                // shot has had - guarantees every projectile resolves eventually, however many
+                // times it's bounced (a Spring/Reflective floor or wall), wrapped, or otherwise
+                // kept flying, without needing any of those mechanics to individually promise
+                // termination on their own. Takes priority over every other branch below,
+                // detonating wherever the projectile currently is.
+                p.elapsedSeconds >= PROJECTILE_FUSE_SECONDS -> {
+                    resolveImpact(p.weapon, p.x, p.y, shooterOwnerId(p))
+                    pendingEvents += GameEvent.Impact
+                    iterator.remove()
+                }
                 // Impact point is always anchored to the ground surface, never floating in
                 // mid-air - whether the projectile stopped by touching a tank's body (which
                 // can happen while still somewhat elevated - tanks are sizable now; kept
@@ -429,14 +441,12 @@ class GameEngine(
                 }
             }
             else -> { // PADDED, RUBBER, SPRING, REFLECTIVE
-                val retention = velocityRetention(edgeType)
                 if (isWall) {
                     p.x = p.x.coerceIn(0f, terrain.width.toFloat())
-                    p.vx = -p.vx * retention
                 } else {
                     p.y = 0f
-                    p.vy = -p.vy * retention
                 }
+                applyBounceVelocity(p, edgeType, isVerticalAxis = !isWall)
                 activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
             }
         }
@@ -445,9 +455,61 @@ class GameEngine(
     private fun velocityRetention(edgeType: EdgeType): Float = when (edgeType) {
         EdgeType.PADDED -> 0.1f
         EdgeType.RUBBER -> 0.45f
-        EdgeType.SPRING -> 1.2f
-        EdgeType.REFLECTIVE -> 1.0f
+        EdgeType.SPRING -> 0.7f
+        EdgeType.REFLECTIVE -> 0.98f
         else -> error("velocityRetention called for non-bounce EdgeType $edgeType")
+    }
+
+    /**
+     * Applies [edgeType]'s [velocityRetention] to whichever axis this bounce affects - [p]'s
+     * own `vy` for a floor/ceiling bounce, `vx` for a wall bounce ([isVerticalAxis] selects
+     * which). For [EdgeType.SPRING] only, also clamps the resulting speed on that axis to never
+     * launch weaker than [SPRING_MIN_LAUNCH_FRACTION] of the map's own size in that direction -
+     * so a Spring bounce always launches the projectile meaningfully back into the play area,
+     * unlike Padded/Rubber/Reflective, which are allowed to gradually decay - and rotates the
+     * whole velocity vector by a small random angle (up to [SPRING_DEFLECTION_MAX_DEGREES]) so
+     * it drifts sideways over repeated bounces instead of cycling the exact same line forever.
+     * Together this reliably carries a Spring bounce onward to real terrain or a tank within a
+     * handful of bounces, rather than relying purely on [PROJECTILE_FUSE_SECONDS] to end it -
+     * Padded/Rubber/Reflective have no such guarantee (nor any deflection) and may take many
+     * more bounces (Reflective) or settle almost immediately (Padded/Rubber) before the fuse
+     * would ever matter.
+     */
+    private fun applyBounceVelocity(p: Projectile, edgeType: EdgeType, isVerticalAxis: Boolean) {
+        val retention = velocityRetention(edgeType)
+        val original = if (isVerticalAxis) p.vy else p.vx
+        var reflected = -original * retention
+        if (edgeType == EdgeType.SPRING) {
+            val screenSize = if (isVerticalAxis) terrain.height else terrain.width
+            val minSpeed = sqrt(2f * GRAVITY * SPRING_MIN_LAUNCH_FRACTION * screenSize)
+            if (abs(reflected) < minSpeed) {
+                val direction = when {
+                    reflected > 0f -> 1f
+                    reflected < 0f -> -1f
+                    original > 0f -> -1f // fell straight in (e.g. vy>0 hitting the floor) - bounce away from it
+                    original < 0f -> 1f
+                    else -> 1f // the vanishingly rare exactly-zero case - any direction resolves it
+                }
+                reflected = minSpeed * direction
+            }
+        }
+        if (isVerticalAxis) p.vy = reflected else p.vx = reflected
+        if (edgeType == EdgeType.SPRING) {
+            val deflectionDeg = SPRING_DEFLECTION_MAX_DEGREES * (rng.nextFloat() * 2f - 1f)
+            rotateVelocity(p, deflectionDeg)
+        }
+    }
+
+    /** Rotates ([p.vx], [p.vy]) by [deltaDeg] degrees, preserving speed - same angle convention
+     * as [com.scorchedphoto.engine.physics.launchVelocity]/
+     * [com.scorchedphoto.engine.physics.screenOffsetToAngleDeg]. Used only by
+     * [applyBounceVelocity]'s Spring deflection. */
+    private fun rotateVelocity(p: Projectile, deltaDeg: Float) {
+        val speed = hypot(p.vx.toDouble(), p.vy.toDouble())
+        val currentAngleRad = kotlin.math.atan2(-p.vy.toDouble(), p.vx.toDouble())
+        val newAngleRad = currentAngleRad + Math.toRadians(deltaDeg.toDouble())
+        p.vx = (kotlin.math.cos(newAngleRad) * speed).toFloat()
+        p.vy = -(kotlin.math.sin(newAngleRad) * speed).toFloat()
     }
 
     /**
@@ -464,15 +526,13 @@ class GameEngine(
      * there to explode into, and letting a projectile fly forever over open floor would
      * otherwise stall [tick]'s resolution-completion check; the remaining four types bounce off
      * the phantom floor exactly like they'd bounce off a wall, reusing the same
-     * [velocityRetention] values and [BounceEffect] visuals (via [EdgeType], used here purely as
-     * a shared rendering vocabulary between wall/ceiling/floor bounces, not because a floor
-     * bounce is "a wall") - Spring/Reflective (retention >= 1f, no energy lost or even gained per
-     * bounce) get exactly one real bounce; on their second return to the true floor they detonate
-     * instead, since gravity alone can never bring a lossless or energy-gaining bounce to rest -
-     * left unbounded, one would fly forever, stalling resolution exactly like a bare HOLE/VOID
-     * projectile would without its own fizzle above. Padded/Rubber (retention < 1f) keep
-     * bouncing - each one measurably loses speed, so they settle within a handful of bounces on
-     * their own.
+     * [applyBounceVelocity]/[BounceEffect] visuals (via [EdgeType], used here purely as a shared
+     * rendering vocabulary between wall/ceiling/floor bounces, not because a floor bounce is "a
+     * wall") - none of the four bounce types is individually guaranteed to ever settle here
+     * (Reflective's 0.98 retention decays very slowly; Spring's own decay is offset by its own
+     * minimum-launch-speed floor - see [applyBounceVelocity]'s own doc), so [PROJECTILE_FUSE_SECONDS]
+     * is what actually guarantees this branch can never stall match resolution the way an
+     * unbounded HOLE/VOID fizzle-less float would.
      */
     private fun handleFloorEdge(iterator: MutableIterator<Projectile>, p: Projectile) {
         when (floorType) {
@@ -494,17 +554,9 @@ class GameEngine(
                     FloorType.SPRING -> EdgeType.SPRING
                     else -> EdgeType.REFLECTIVE
                 }
-                val retention = velocityRetention(edgeType)
-                if (retention >= 1f && p.hasBouncedOffFloor) {
-                    resolveImpact(p.weapon, p.x, p.y, shooterOwnerId(p))
-                    pendingEvents += GameEvent.Impact
-                    iterator.remove()
-                } else {
-                    p.y = terrain.height.toFloat()
-                    p.vy = -p.vy * retention
-                    p.hasBouncedOffFloor = true
-                    activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
-                }
+                p.y = terrain.height.toFloat()
+                applyBounceVelocity(p, edgeType, isVerticalAxis = true)
+                activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
             }
             FloorType.GROUND, FloorType.WATER, FloorType.LAVA -> Unit // unreachable, see doc above
         }
@@ -1195,5 +1247,13 @@ class GameEngine(
         private const val LAVA_PROXIMITY_DAMAGE_FRACTION = 0.10f
         private const val LAVA_PROXIMITY_HORIZONTAL_FRACTION = 0.05f
         private const val LAVA_PROXIMITY_VERTICAL_FRACTION = 0.02f
+
+        // The match-wide guarantee every projectile eventually resolves - see tickProjectiles'
+        // own doc on its fuse-check dispatch branch.
+        private const val PROJECTILE_FUSE_SECONDS = 30f
+
+        // Spring's own bounce guarantees - see applyBounceVelocity's own doc.
+        private const val SPRING_MIN_LAUNCH_FRACTION = 0.25f
+        private const val SPRING_DEFLECTION_MAX_DEGREES = 2f
     }
 }
