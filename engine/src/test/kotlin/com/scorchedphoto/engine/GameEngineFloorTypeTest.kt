@@ -92,6 +92,46 @@ class GameEngineFloorTypeTest {
     }
 
     @Test
+    fun `floor type Reflective bounces once with full retention, then detonates on its second return instead of bouncing forever`() {
+        val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
+        terrain.groundY[100] = terrain.height
+        val shooter = testTank(id = 1, ownerId = 1, x = 100f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, floorType = FloorType.REFLECTIVE, rng = Random(1))
+        shooter.angleDeg = 270f
+        shooter.power = 50f
+        engine.fire()
+
+        // First bounce: same shape as the Padded test above - reflects with full speed intact
+        // and keeps flying.
+        var ticks = 0
+        while (engine.bounceEffects.isEmpty() && ticks < 200) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertTrue("expected the floor to reflect the projectile", engine.bounceEffects.isNotEmpty())
+        assertTrue("expected the projectile still flying after its first bounce", engine.projectiles.isNotEmpty())
+        assertTrue(
+            "expected an upward (negative) velocity after bouncing off the floor",
+            engine.projectiles.single().vy < 0f,
+        )
+
+        // Reflective's 100% retention never loses enough speed to settle on its own - left
+        // uncapped, this exact scenario bounces forever (verified empirically before this fix)
+        // and would stall the match indefinitely. Confirms it now resolves within a bounded
+        // number of ticks instead.
+        ticks = 0
+        while (engine.projectiles.isNotEmpty() && ticks < 500) {
+            engine.tick(1f / 60f)
+            ticks++
+        }
+        assertTrue(
+            "expected the second return to the true floor to detonate the projectile, not bounce again",
+            engine.projectiles.isEmpty(),
+        )
+        assertTrue("expected a real explosion on the second contact", engine.impactEffects.isNotEmpty())
+    }
+
+    @Test
     fun `floor type Blast Steel detonates a projectile that reaches the true bottom`() {
         val terrain = flatTerrain(width = 200, height = 200, groundY = 50)
         terrain.groundY[100] = terrain.height

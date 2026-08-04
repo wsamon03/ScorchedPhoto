@@ -466,7 +466,13 @@ class GameEngine(
      * the phantom floor exactly like they'd bounce off a wall, reusing the same
      * [velocityRetention] values and [BounceEffect] visuals (via [EdgeType], used here purely as
      * a shared rendering vocabulary between wall/ceiling/floor bounces, not because a floor
-     * bounce is "a wall").
+     * bounce is "a wall") - Spring/Reflective (retention >= 1f, no energy lost or even gained per
+     * bounce) get exactly one real bounce; on their second return to the true floor they detonate
+     * instead, since gravity alone can never bring a lossless or energy-gaining bounce to rest -
+     * left unbounded, one would fly forever, stalling resolution exactly like a bare HOLE/VOID
+     * projectile would without its own fizzle above. Padded/Rubber (retention < 1f) keep
+     * bouncing - each one measurably loses speed, so they settle within a handful of bounces on
+     * their own.
      */
     private fun handleFloorEdge(iterator: MutableIterator<Projectile>, p: Projectile) {
         when (floorType) {
@@ -488,9 +494,17 @@ class GameEngine(
                     FloorType.SPRING -> EdgeType.SPRING
                     else -> EdgeType.REFLECTIVE
                 }
-                p.y = terrain.height.toFloat()
-                p.vy = -p.vy * velocityRetention(edgeType)
-                activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
+                val retention = velocityRetention(edgeType)
+                if (retention >= 1f && p.hasBouncedOffFloor) {
+                    resolveImpact(p.weapon, p.x, p.y, shooterOwnerId(p))
+                    pendingEvents += GameEvent.Impact
+                    iterator.remove()
+                } else {
+                    p.y = terrain.height.toFloat()
+                    p.vy = -p.vy * retention
+                    p.hasBouncedOffFloor = true
+                    activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
+                }
             }
             FloorType.GROUND, FloorType.WATER, FloorType.LAVA -> Unit // unreachable, see doc above
         }
