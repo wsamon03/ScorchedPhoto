@@ -73,6 +73,20 @@ data class Tank(
     // must never affect GameEngine.deathAnimationsDone's round-progression gate the way
     // Tank.burning does. See GameEngine.applyPendingDotDamage/resolveImpact.
     var dotBurning: Boolean = false,
+    // Kill-attribution bookkeeping - see GameEngine.resolveImpact/DeathRecord's own doc for the
+    // full rules. creditOwnerId is the owner most recently "responsible" for this tank (any live
+    // shot or propagated chain-explosion that reached within its blast radius, attributed or not);
+    // it drives fall/lava/void/drowning/fall-through death attribution and expires once a full
+    // round passes with this tank clear of any ongoing hazard (see GameEngine.finishResolution).
+    // dotSourceOwnerId/dotSourceImpactId are set only when a DoT effect is freshly applied and are
+    // deliberately independent of creditOwnerId, so a later unrelated hit can't steal credit for
+    // an already-ticking burn. deathKillerOwnerId snapshots whoever's credited for this tank's own
+    // death, reused as the shooter id for this tank's own chain death-explosion, so a whole chain
+    // of explosions still credits back to whoever started it.
+    var creditOwnerId: Int? = null,
+    var dotSourceOwnerId: Int? = null,
+    var dotSourceImpactId: Int? = null,
+    var deathKillerOwnerId: Int? = null,
     val difficulty: Difficulty = Difficulty.MEDIUM,
     val shape: TankShape = TankShape.CLASSIC,
 ) {

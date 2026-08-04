@@ -32,6 +32,20 @@ enum class MatchPhase { AIMING, FIRING, RESOLVING, GAME_OVER }
 private data class TerrainHit(val x: Float, val y: Float)
 
 /**
+ * One tank's death, appended to [GameEngine.deathLog] the moment it happens - the full history
+ * multi-game tournament scoring (see the :app `tournament` package) is built from.
+ * [turnNumber] is the turn during which the tank died (see [GameEngine]'s own `turnNumber`
+ * field) - two records sharing a [turnNumber] died simultaneously, the tie-break signal
+ * Knockout/Survivor/Standing scoring all need. [impactId] identifies which single blast (a
+ * live shot's direct/splash damage, or a DoT tick sourced from one - see
+ * [Tank.dotSourceImpactId]) this death came from; `null` for a death with no single
+ * attributable blast (fall damage, lava, drowning, falling through an open floor - though
+ * [killedByOwnerId] can still be non-null for these, see rule 4 in [GameEngine.resolveImpact]'s
+ * own doc). [killedByOwnerId] is the owner credited for this death, or `null` if unattributed.
+ */
+data class DeathRecord(val ownerId: Int, val tankId: Int, val turnNumber: Int, val impactId: Int?, val killedByOwnerId: Int?)
+
+/**
  * Orchestrates a full match: turn order, firing, projectile physics, terrain/tank
  * collision, crater carving, damage, tank gravity, and win detection. This is the single
  * source of truth the real-time game loop (:app) drives via [tick]; UI layers observe its
@@ -67,6 +81,24 @@ class GameEngine(
     // fire(). Used only for the mutual-elimination tie case in finishResolution(), where
     // TurnManager.checkWinCondition() has no alive tank left to identify a winner from.
     private val killedThisResolution = mutableSetOf<Int>()
+
+    // The turn currently in progress - incremented in finishResolution() right before turn
+    // control actually passes to the next tank, so every DeathRecord appended between one
+    // increment and the next died "on the same turn" (see DeathRecord's own doc). Starts at 1,
+    // the match's first turn.
+    private var turnNumber = 1
+
+    // Identifies a single resolveImpact() call (one blast) for DeathRecord.impactId - see its
+    // own doc. Incremented at the top of every resolveImpact() call, live shot or chain
+    // explosion alike.
+    private var impactSequence = 0
+
+    private val recordedDeaths = mutableListOf<DeathRecord>()
+
+    /** Every tank death so far this match, in the order they happened - see [DeathRecord]'s own
+     * doc. Read by :app's tournament scoring once a match ends; otherwise unused by the engine
+     * itself beyond producing it. */
+    val deathLog: List<DeathRecord> get() = recordedDeaths
 
     var phase: MatchPhase = MatchPhase.AIMING
         private set
@@ -276,7 +308,7 @@ class GameEngine(
                 // land). Each affected tank's own distance to this point (not snapped to any
                 // specific tank's center) drives its damage via DamageCalculator.
                 touchedTank -> {
-                    resolveImpact(p.weapon, p.x, terrainY.toFloat())
+                    resolveImpact(p.weapon, p.x, terrainY.toFloat(), shooterOwnerId(p))
                     pendingEvents += GameEvent.Impact
                     iterator.remove()
                 }
@@ -290,7 +322,7 @@ class GameEngine(
                         // (touchedTank, above) always still detonates regardless of water.
                         iterator.remove()
                     } else {
-                        resolveImpact(p.weapon, hit.x, hit.y)
+                        resolveImpact(p.weapon, hit.x, hit.y, shooterOwnerId(p))
                         pendingEvents += GameEvent.Impact
                         iterator.remove()
                     }
@@ -306,6 +338,11 @@ class GameEngine(
 
         spawned?.let { activeProjectiles += it }
     }
+
+    /** The owner id to credit for a still-flying [p]'s eventual impact - the tank that fired it,
+     * or `null` if that tank is no longer in [tanks] (shouldn't happen in practice, but a
+     * projectile outliving its shooter isn't otherwise impossible to represent). */
+    private fun shooterOwnerId(p: Projectile): Int? = tanks.find { it.id == p.ownerTankId }?.ownerId
 
     /**
      * Once a tick's own final position has already been determined to be grounded (see
@@ -366,7 +403,7 @@ class GameEngine(
         when (edgeType) {
             EdgeType.NONE -> Unit // unreachable - callers only invoke this when edgeType != NONE
             EdgeType.BLAST_STEEL -> {
-                resolveImpact(p.weapon, p.x, p.y)
+                resolveImpact(p.weapon, p.x, p.y, shooterOwnerId(p))
                 pendingEvents += GameEvent.Impact
                 iterator.remove()
             }
@@ -386,7 +423,7 @@ class GameEngine(
                     // max()-clamped carving naturally turns that into the intended "collapse
                     // the mountain down to fill the hole" effect (see its own doc).
                     activeBounceEffects += BounceEffect(p.x, p.y, edgeType) // exit point, at the ceiling
-                    resolveImpact(p.weapon, p.x, ceilingWrapDepthY)
+                    resolveImpact(p.weapon, p.x, ceilingWrapDepthY, shooterOwnerId(p))
                     pendingEvents += GameEvent.Impact
                     iterator.remove()
                 }
@@ -434,7 +471,7 @@ class GameEngine(
     private fun handleFloorEdge(iterator: MutableIterator<Projectile>, p: Projectile) {
         when (floorType) {
             FloorType.BLAST_STEEL -> {
-                resolveImpact(p.weapon, p.x, p.y)
+                resolveImpact(p.weapon, p.x, p.y, shooterOwnerId(p))
                 pendingEvents += GameEvent.Impact
                 iterator.remove()
             }
@@ -469,8 +506,20 @@ class GameEngine(
      * everything else is an ordinary amount that only kills if it actually brings health
      * to 0. Callers are responsible for pushing whichever [GameEvent] matches their own
      * source, since a shell landing and a tank's own death blast sound different.
+     *
+     * [shooterOwnerId] is whoever's credited for this blast - the tank that fired the shot for
+     * an ordinary impact, or (per [updateAwaitingExplosion]) whoever was credited for killing
+     * the tank whose own death explosion this is, so a chain of explosions keeps crediting
+     * back to whoever started it. `null` for an unattributed blast (a chain explosion whose own
+     * predecessor death was itself unattributed). Every alive tank within the blast's actual
+     * reach (mirroring [DamageCalculator.computeDamage]'s own distance formula, not just
+     * [Weapon.blastRadius] in isolation) has [Tank.creditOwnerId] stamped with this value
+     * *before* damage is computed, regardless of whether it ends up taking any - this is the
+     * single mechanism every other environmental/fall/hazard attribution rule in this file
+     * builds on (see each of those call sites' own use of `tank.creditOwnerId`).
      */
-    private fun resolveImpact(weapon: Weapon, impactX: Float, impactY: Float) {
+    private fun resolveImpact(weapon: Weapon, impactX: Float, impactY: Float, shooterOwnerId: Int?) {
+        val impactId = impactSequence++
         when (weapon.terrainEffect) {
             TerrainEffect.CARVE -> {
                 CraterCarver.carve(terrain, impactX.toInt(), impactY.toInt(), weapon.blastRadius.toInt(), floorMaxGroundY())
@@ -488,24 +537,32 @@ class GameEngine(
         activeImpactEffects += ImpactEffect(impactX, impactY, weapon.blastRadius)
         for (tank in tanks) {
             if (!tank.alive) continue
+            val distance = hypot((tank.x - impactX).toDouble(), (tank.y - impactY).toDouble()).toFloat()
+            if (distance <= Tank.RADIUS + weapon.blastRadius) {
+                tank.creditOwnerId = shooterOwnerId
+            }
             val damage = DamageCalculator.computeDamage(weapon, impactX, impactY, tank)
             when {
                 damage == null -> {
                     if (weapon.maxDamage > 0) {
                         tank.health = 0
-                        killOrDrown(tank)
+                        killOrDrown(tank, tank.creditOwnerId, impactId)
                     }
                 }
                 damage > 0 -> {
                     tank.health = (tank.health - damage).coerceAtLeast(0)
                     if (tank.health == 0) {
-                        killOrDrown(tank)
+                        killOrDrown(tank, tank.creditOwnerId, impactId)
                     } else if (weapon.dotRounds > 0) {
                         // Overwrites rather than stacks with an already-pending effect - see
-                        // Tank.dotRoundsRemaining's own doc.
+                        // Tank.dotRoundsRemaining's own doc. dotSourceOwnerId/dotSourceImpactId
+                        // are independent of creditOwnerId (see Tank's own doc) so a later,
+                        // unrelated hit can't steal credit for this already-ticking burn.
                         tank.dotRoundsRemaining = weapon.dotRounds
                         tank.dotDamagePerRound = DamageCalculator.percentOfMaxHealth(weapon.dotFraction)
                         tank.dotBurning = weapon.dotIsFire
+                        tank.dotSourceOwnerId = shooterOwnerId
+                        tank.dotSourceImpactId = impactId
                     }
                 }
             }
@@ -525,11 +582,15 @@ class GameEngine(
 
     /** Marks [tank] dead and queues its death animation - see [Tank.pendingBurn] - and
      * records it in [killedThisResolution] so a mutual-elimination tie (see
-     * [finishResolution]) can still name who was actually tied. */
-    private fun kill(tank: Tank) {
+     * [finishResolution]) can still name who was actually tied. Also appends a [DeathRecord]
+     * and snapshots [killedByOwnerId] onto [Tank.deathKillerOwnerId], so this tank's own later
+     * death explosion (see [updateAwaitingExplosion]) keeps crediting the same owner. */
+    private fun kill(tank: Tank, killedByOwnerId: Int?, impactId: Int?) {
         tank.alive = false
         tank.pendingBurn = true
+        tank.deathKillerOwnerId = killedByOwnerId
         killedThisResolution += tank.id
+        recordedDeaths += DeathRecord(tank.ownerId, tank.id, turnNumber, impactId, killedByOwnerId)
     }
 
     /** Marks [tank] dead and queues its drowning animation - little bubbles, then a
@@ -537,11 +598,13 @@ class GameEngine(
      * permanently at) the water's own rising surface - see [Tank.pendingDrown] and its onward
      * chain. Deliberately bypasses [kill]'s ordinary burn/explosion/ash sequence entirely:
      * drowning is peaceful, not violent - no fire, no death-explosion crater, no splash damage
-     * to nearby tanks. */
-    private fun killByDrowning(tank: Tank) {
+     * to nearby tanks. Appends a [DeathRecord] the same way [kill] does - see its own doc. */
+    private fun killByDrowning(tank: Tank, killedByOwnerId: Int?, impactId: Int?) {
         tank.alive = false
+        tank.deathKillerOwnerId = killedByOwnerId
         killedThisResolution += tank.id
         tank.pendingDrown = true
+        recordedDeaths += DeathRecord(tank.ownerId, tank.id, turnNumber, impactId, killedByOwnerId)
     }
 
     /** Chooses between the ordinary burn/explosion/ash death ([kill]) and the drowning
@@ -550,11 +613,11 @@ class GameEngine(
      * damage, or a fall into deep water); a tank that's only partially submerged (or on any
      * non-Water floor) still gets the ordinary sequence. Mirrors [applyDrowningCheck]'s own
      * submersion test exactly. */
-    private fun killOrDrown(tank: Tank) {
+    private fun killOrDrown(tank: Tank, killedByOwnerId: Int?, impactId: Int?) {
         if (floorType == FloorType.WATER && tank.y - Tank.RADIUS >= currentWaterLevelY) {
-            killByDrowning(tank)
+            killByDrowning(tank, killedByOwnerId, impactId)
         } else {
-            kill(tank)
+            kill(tank, killedByOwnerId, impactId)
         }
     }
 
@@ -633,7 +696,10 @@ class GameEngine(
         for (tank in tanks) {
             if (!tank.alive) continue
             if (tank.y - Tank.RADIUS >= currentWaterLevelY) {
-                killByDrowning(tank)
+                // Attributed only if a blast knocked this tank somewhere the rising water then
+                // reached (tank.creditOwnerId) - the water simply rising to a tank that never
+                // moved is "strictly hazard spreading" and stays unattributed.
+                killByDrowning(tank, tank.creditOwnerId, impactId = null)
             }
         }
     }
@@ -648,26 +714,31 @@ class GameEngine(
     private fun applyLavaRoundDamage() {
         for (tank in tanks) {
             if (!tank.alive) continue
-            val touching = activeLavaRegions.any { region -> !tank.falling && abs(tank.x - region.centerX) <= region.radius }
-            if (touching) {
+            if (isTouchingLava(tank)) {
                 applyLavaDamage(tank, LAVA_TOUCH_DAMAGE_FRACTION)
                 continue
             }
-            val nearby = activeLavaRegions.any { region ->
-                val horizontalGap = abs(tank.x - region.centerX) - region.radius
-                val verticalGap = abs(tank.y - terrain.heightAt(region.centerX.toInt()).toFloat())
-                horizontalGap in 0f..(LAVA_PROXIMITY_HORIZONTAL_FRACTION * terrain.width) &&
-                    verticalGap <= LAVA_PROXIMITY_VERTICAL_FRACTION * terrain.height
-            }
-            if (nearby) {
+            if (isNearLava(tank)) {
                 applyLavaDamage(tank, LAVA_PROXIMITY_DAMAGE_FRACTION)
             }
         }
     }
 
+    private fun isTouchingLava(tank: Tank): Boolean =
+        activeLavaRegions.any { region -> !tank.falling && abs(tank.x - region.centerX) <= region.radius }
+
+    private fun isNearLava(tank: Tank): Boolean = activeLavaRegions.any { region ->
+        val horizontalGap = abs(tank.x - region.centerX) - region.radius
+        val verticalGap = abs(tank.y - terrain.heightAt(region.centerX.toInt()).toFloat())
+        horizontalGap in 0f..(LAVA_PROXIMITY_HORIZONTAL_FRACTION * terrain.width) &&
+            verticalGap <= LAVA_PROXIMITY_VERTICAL_FRACTION * terrain.height
+    }
+
     private fun applyLavaDamage(tank: Tank, fraction: Float) {
         tank.health = (tank.health - DamageCalculator.percentOfMaxHealth(fraction)).coerceAtLeast(0)
-        if (tank.health == 0) killOrDrown(tank)
+        // Attributed only if a blast is why this tank is here at all (tank.creditOwnerId) - a
+        // tank that walked into lava that grew to reach it on its own has no credit to give.
+        if (tank.health == 0) killOrDrown(tank, tank.creditOwnerId, impactId = null)
     }
 
     /** Weapon-inflicted damage-over-time (Nuke/Napalm - see [Tank.dotRoundsRemaining]'s own
@@ -680,7 +751,9 @@ class GameEngine(
             tank.health = (tank.health - tank.dotDamagePerRound).coerceAtLeast(0)
             tank.dotRoundsRemaining--
             if (tank.health == 0) {
-                killOrDrown(tank)
+                // Whoever applied this DoT gets credit, not whatever tank.creditOwnerId
+                // currently holds - see Tank.dotSourceOwnerId's own doc.
+                killOrDrown(tank, tank.dotSourceOwnerId, tank.dotSourceImpactId)
             } else if (tank.dotRoundsRemaining <= 0) {
                 tank.dotBurning = false
             }
@@ -696,12 +769,18 @@ class GameEngine(
      * point it fell through, not wherever it might otherwise have kept falling to. */
     private fun killByFallingThroughFloor(tank: Tank) {
         tank.alive = false
+        // A fall-through only ever happens because some blast fully hollowed this column (a
+        // live shot) or a hazard region grew to reach it (unattributed) - tank.creditOwnerId
+        // already distinguishes the two, same as applyFallDamage/applyLavaDamage.
+        val killedByOwnerId = tank.creditOwnerId
+        tank.deathKillerOwnerId = killedByOwnerId
         killedThisResolution += tank.id
         tank.fallingThroughFloor = true
         tank.fallThroughElapsed = 0f
         tank.fallThroughAnchorY = terrain.height.toFloat()
         tank.falling = false
         tank.fallVelocity = 0f
+        recordedDeaths += DeathRecord(tank.ownerId, tank.id, turnNumber, impactId = null, killedByOwnerId)
     }
 
     /** Clears [Tank.fallingThroughFloor] (and with it, its death-taunt speech bubble) once
@@ -869,6 +948,11 @@ class GameEngine(
      * damage happens to bring its existing health to 0, same as splash damage.
      */
     private fun applyFallDamage(tank: Tank) {
+        // A tank already dead from an earlier cause (e.g. the same blast that carved away its
+        // ground also killed it outright) keeps "falling" purely for its death animation's own
+        // sake - see applyTankGravity's own doc - and must never be killed a second time once
+        // its fall actually completes and lands.
+        if (!tank.alive) return
         // v^2 = 2*g*distance (constant acceleration from rest), using the fall's final
         // velocity right before it's reset below - avoids needing to track a separate
         // "fall started at" position on Tank.
@@ -878,7 +962,10 @@ class GameEngine(
         if (damage > 0) {
             tank.health = (tank.health - damage).coerceAtLeast(0)
             if (tank.health == 0) {
-                killOrDrown(tank)
+                // A fall only ever happens because some blast removed the tank's ground -
+                // tank.creditOwnerId already holds whoever's blast most recently did that (or
+                // null if it was never a live shot, e.g. a naturally-spreading Void region).
+                killOrDrown(tank, tank.creditOwnerId, impactId = null)
             }
         }
     }
@@ -911,7 +998,10 @@ class GameEngine(
                 tank.awaitingExplosion = false
                 tank.exploding = true
                 tank.explodingElapsed = 0f
-                resolveImpact(WeaponCatalog.TANK_DEATH_EXPLOSION, tank.x, tank.y)
+                // Propagates whoever was credited for killing this tank onward to anyone this
+                // explosion itself kills - see Tank.deathKillerOwnerId's own doc - so a whole
+                // chain of explosions keeps crediting back to whoever started it.
+                resolveImpact(WeaponCatalog.TANK_DEATH_EXPLOSION, tank.x, tank.y, tank.deathKillerOwnerId)
                 pendingEvents += GameEvent.TankExploded(tank.id)
             }
         }
@@ -979,6 +1069,7 @@ class GameEngine(
             if (turnsCompletedThisRound >= tanksAliveAtRoundStart) {
                 processFloorRound()
                 applyPendingDotDamage()
+                expireStaleCredit()
                 turnsCompletedThisRound = 0
                 tanksAliveAtRoundStart = tanks.count { it.alive }
             }
@@ -997,9 +1088,24 @@ class GameEngine(
             phase = MatchPhase.GAME_OVER
             return
         }
+        turnNumber++
         turnManager.advanceToNextAliveTank()
         wind.reroll(maxWindMagnitude, rng)
         phase = MatchPhase.AIMING
+    }
+
+    /** Bounds how long a stale [Tank.creditOwnerId] can linger (see its own doc and rule 6 in
+     * [resolveImpact]'s doc): once a full round passes with a tank clear of every ongoing
+     * hazard threat - not falling, no active DoT, not touching/near lava - whatever blast last
+     * touched it is no longer relevant to anything that might kill it later, so credit resets
+     * to `null`. Called once per completed round, right alongside [processFloorRound]/
+     * [applyPendingDotDamage]. */
+    private fun expireStaleCredit() {
+        for (tank in tanks) {
+            if (!tank.alive || tank.falling || tank.dotRoundsRemaining > 0) continue
+            if (isTouchingLava(tank) || isNearLava(tank)) continue
+            tank.creditOwnerId = null
+        }
     }
 
     /**

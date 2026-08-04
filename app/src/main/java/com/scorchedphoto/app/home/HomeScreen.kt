@@ -15,6 +15,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -28,7 +29,12 @@ import com.scorchedphoto.app.R
 import com.scorchedphoto.app.ui.LockScreenOrientation
 
 @Composable
-fun HomeScreen(onNewGame: () -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(
+    onNewGame: () -> Unit,
+    onMultiGame: () -> Unit,
+    onSettings: () -> Unit,
+    viewModel: HomeViewModel = hiltViewModel(),
+) {
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_USER)
     Box(modifier = Modifier.fillMaxSize()) {
         // Background icon
@@ -66,8 +72,11 @@ fun HomeScreen(onNewGame: () -> Unit, onSettings: () -> Unit) {
 
             Box(modifier = Modifier.weight(1f))
 
-            Button(onClick = onNewGame) {
-                Text("New Game")
+            Button(onClick = { viewModel.clearTournament(); onNewGame() }) {
+                Text("Single Game")
+            }
+            Button(onClick = onMultiGame, modifier = Modifier.padding(top = 8.dp)) {
+                Text("Multi-Game")
             }
             IconButton(onClick = onSettings, modifier = Modifier.padding(top = 12.dp)) {
                 Icon(

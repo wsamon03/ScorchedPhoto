@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.scorchedphoto.app.game.SkyLook
 import com.scorchedphoto.app.settings.MatchDefaultsRepository
+import com.scorchedphoto.app.tournament.TournamentRepository
+import com.scorchedphoto.app.tournament.TournamentState
+import com.scorchedphoto.app.tournament.TournamentTankState
 import com.scorchedphoto.app.tts.CustomVoice
 import com.scorchedphoto.app.tts.CustomVoiceRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
@@ -35,6 +38,7 @@ class GameSetupViewModel @Inject constructor(
     private val deathLineSpeaker: DeathLineSpeaker,
     private val customVoiceRepository: CustomVoiceRepository,
     private val matchDefaultsRepository: MatchDefaultsRepository,
+    private val tournamentRepository: TournamentRepository,
 ) : ViewModel() {
 
     /** Real voices this device's TTS engine has, for the setup screen's voice picker -
@@ -187,19 +191,35 @@ class GameSetupViewModel @Inject constructor(
      * only by TERRAIN/SKY photo usage modes respectively - always auto-randomized, with no
      * user-facing control of their own). photoUsageMode itself is left at its default here;
      * TerrainPreviewViewModel patches it into this same repository entry once the user picks
-     * it on the terrain-creation screen, which is reached only after this commits. */
+     * it on the terrain-creation screen, which is reached only after this commits.
+     *
+     * If a tournament mode was picked on [com.scorchedphoto.app.tournament.MultiGameSetupScreen],
+     * also seeds [TournamentRepository.state] from this roster - this screen is only ever
+     * reached once per tournament (later games loop straight from
+     * [com.scorchedphoto.app.result.VictoryScreen] back into [com.scorchedphoto.app.game.GameScreen]
+     * without revisiting setup), so `state == null` here reliably means "this is the
+     * tournament's first game," guarding against ever re-seeding (and so discarding) an
+     * already-in-progress tournament's standings. */
     fun commitAndStart() {
         val resolvedWallType = _wallType.value ?: EdgeType.entries.random()
         val resolvedCeilingType = _ceilingType.value ?: EdgeType.entries.random()
         val resolvedFloorType = _floorType.value ?: FloorType.entries.random()
+        val tankConfigs = _tankConfigs.value
         matchConfigRepository.matchConfig = MatchConfig(
-            _tankConfigs.value,
+            tankConfigs,
             resolvedWallType,
             resolvedCeilingType,
             resolvedFloorType,
             skyLook = SkyLook.entries.random(),
             terrainColor = TERRAIN_COLOR_PALETTE.random(),
         )
+        val tournamentConfig = tournamentRepository.config
+        if (tournamentConfig != null && tournamentRepository.state == null) {
+            tournamentRepository.state = TournamentState(
+                tournamentConfig,
+                tankConfigs.mapIndexed { index, config -> TournamentTankState(index, config.name, config.color) }.toMutableList(),
+            )
+        }
     }
 
     private fun updateAt(index: Int, transform: (TankConfig) -> TankConfig) {

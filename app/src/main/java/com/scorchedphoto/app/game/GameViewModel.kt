@@ -9,7 +9,10 @@ import com.scorchedphoto.app.result.MatchWinner
 import com.scorchedphoto.app.settings.PhraseCategory
 import com.scorchedphoto.app.settings.PhraseRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
+import com.scorchedphoto.app.setup.TankConfig
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
+import com.scorchedphoto.app.tournament.TournamentRepository
+import com.scorchedphoto.app.tournament.TournamentScorer
 import com.scorchedphoto.app.tts.DeathLineSpeaker
 import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.GameEngine
@@ -35,6 +38,7 @@ class GameViewModel @Inject constructor(
     photoRepository: PhotoRepository,
     phraseRepository: PhraseRepository,
     private val matchResultRepository: MatchResultRepository,
+    private val tournamentRepository: TournamentRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
     val soundController: GameSoundController,
 ) : ViewModel() {
@@ -59,7 +63,17 @@ class GameViewModel @Inject constructor(
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
 
     private data class TankVoiceSettings(val voiceId: String?, val pitch: Float, val speechRate: Float)
-    private val voiceSettings: List<TankVoiceSettings>
+
+    // Keyed by tank id (== ownerId, == the tournament's own original roster index - see
+    // activeConfigs' own doc below) rather than a plain positional List, since a Knockout/
+    // Survivor game's roster can be a non-dense subset of the tournament's full original one.
+    private val voiceSettings: Map<Int, TankVoiceSettings>
+
+    // Set once publishState() has scored a finished match into the active tournament (see its
+    // own doc) - guards against re-scoring the same match's result on every later tick, since
+    // publishState() itself keeps being called every tick for as long as this ViewModel lives,
+    // long after phase first reaches GAME_OVER.
+    private var tournamentScored = false
 
     // Snapshotted once per match, the same way voiceSettings/heightMap are - a player isn't
     // expected to edit phrases mid-match, and GameSurfaceView/GameRenderer/GameLoopThread
@@ -85,19 +99,32 @@ class GameViewModel @Inject constructor(
         terrainColor = matchConfig.terrainColor
         humanTankCount = matchConfig.tankConfigs.count { !it.isCpu }
 
+        // Knockout/Survivor tournaments drop knocked-out tanks from later games - every
+        // surviving tank keeps its *original* tournament roster index as both Tank.id/ownerId
+        // (matching TournamentTankState.index) rather than being renumbered from 0, so
+        // tournament scoring never needs to remap a game-local id back to the tournament's own
+        // roster identity. A no-op (every index passes straight through) for an ordinary
+        // Single Game or a tournament's own first game, where nothing is knocked out yet -
+        // tournamentRepository.state is seeded with every tank still in the running right
+        // alongside matchConfigRepository.matchConfig itself, see GameSetupViewModel.commitAndStart.
+        val tournamentTanks = tournamentRepository.state?.tanks
+        val activeConfigs: List<Pair<Int, TankConfig>> = matchConfig.tankConfigs.withIndex()
+            .filter { (index, _) -> tournamentTanks?.getOrNull(index)?.knockedOut != true }
+            .map { it.index to it.value }
+
         // Freshly time-seeded (not a fixed/injected Random) so tanks land somewhere new
         // each time this ViewModel is constructed - including "Rematch", which navigates
         // to a brand-new Game.route backstack entry (see ScorchedNavGraph) and therefore
         // a brand-new GameViewModel/init run rather than reusing the previous match's.
-        val positions = TankPlacement.placeX(heightMap, matchConfig.tankConfigs.size, Random(System.nanoTime()))
-        val tanks = matchConfig.tankConfigs.mapIndexed { index, config ->
+        val positions = TankPlacement.placeX(heightMap, activeConfigs.size, Random(System.nanoTime()))
+        val tanks = activeConfigs.mapIndexed { placementIndex, (originalIndex, config) ->
             Tank(
-                id = index,
-                ownerId = index,
+                id = originalIndex,
+                ownerId = originalIndex,
                 name = config.name,
                 color = config.color,
                 isCpu = config.isCpu,
-                x = positions[index].toFloat(),
+                x = positions[placementIndex].toFloat(),
                 y = 0f,
                 currentWeapon = WeaponType.STANDARD_SHELL,
                 difficulty = config.difficulty,
@@ -112,7 +139,9 @@ class GameViewModel @Inject constructor(
             ceilingType = matchConfig.ceilingType,
             floorType = matchConfig.floorType,
         )
-        voiceSettings = matchConfig.tankConfigs.map { TankVoiceSettings(it.voiceId, it.pitch, it.speechRate) }
+        voiceSettings = activeConfigs.associate { (originalIndex, config) ->
+            originalIndex to TankVoiceSettings(config.voiceId, config.pitch, config.speechRate)
+        }
         publishState()
     }
 
@@ -136,7 +165,7 @@ class GameViewModel @Inject constructor(
     }
 
     private fun speakForTank(tankId: Int, spokenText: String) {
-        val settings = voiceSettings.getOrElse(tankId) { TankVoiceSettings(null, 1f, 1f) }
+        val settings = voiceSettings[tankId] ?: TankVoiceSettings(null, 1f, 1f)
         if (settings.voiceId == VoiceOption.NONE.id) return
         deathLineSpeaker.speak(spokenText, settings.voiceId, settings.pitch, settings.speechRate)
     }
@@ -148,6 +177,15 @@ class GameViewModel @Inject constructor(
         if (winResult != null) {
             val winnerTanks = engine.tanks.filter { it.ownerId in winResult.winningOwnerIds }
             matchResultRepository.winners = winnerTanks.map { MatchWinner(it.name, it.color) }
+            matchResultRepository.deathLog = engine.deathLog
+            matchResultRepository.winnerOwnerIds = winResult.winningOwnerIds
+            if (!tournamentScored) {
+                tournamentScored = true
+                tournamentRepository.state?.let { tournamentState ->
+                    tournamentRepository.overallWinnerOwnerId =
+                        TournamentScorer.score(tournamentState, engine.deathLog, winResult.winningOwnerIds)
+                }
+            }
         }
 
         _uiState.value = GameUiState(

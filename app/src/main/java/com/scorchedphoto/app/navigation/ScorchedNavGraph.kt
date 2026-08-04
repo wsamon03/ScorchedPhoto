@@ -19,6 +19,7 @@ import com.scorchedphoto.app.setup.GameSettingsScreen
 import com.scorchedphoto.app.setup.GameSetupScreen
 import com.scorchedphoto.app.setup.GameSetupViewModel
 import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
+import com.scorchedphoto.app.tournament.MultiGameSetupScreen
 
 @Composable
 fun ScorchedNavGraph(navController: NavHostController = rememberNavController()) {
@@ -26,8 +27,12 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
         composable(Screen.Home.route) {
             HomeScreen(
                 onNewGame = { navController.navigate(Screen.GameSetup.route) },
+                onMultiGame = { navController.navigate(Screen.MultiGameSetup.route) },
                 onSettings = { navController.navigate(Screen.Settings.route) },
             )
+        }
+        composable(Screen.MultiGameSetup.route) {
+            MultiGameSetupScreen(onNext = { navController.navigate(Screen.GameSetup.route) })
         }
         composable(Screen.Settings.route) {
             SettingsScreen(
