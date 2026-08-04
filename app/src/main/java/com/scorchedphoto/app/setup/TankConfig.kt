@@ -7,6 +7,12 @@ import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ai.Difficulty
 import com.scorchedphoto.engine.tanks.TankShape
 
+/** Bounds for both a single match's live tank roster ([GameSetupViewModel.addTank]/[GameSetupViewModel.removeTank])
+ * and the persisted default player count edited from the title screen's settings (see
+ * [com.scorchedphoto.app.settings.MatchDefaults]) - shared so the two can never drift apart. */
+const val MIN_TANKS = 2
+const val MAX_TANKS = 6
+
 data class TankConfig(
     val name: String,
     val color: Int,

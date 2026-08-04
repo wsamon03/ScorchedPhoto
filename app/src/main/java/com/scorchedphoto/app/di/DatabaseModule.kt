@@ -3,6 +3,7 @@ package com.scorchedphoto.app.di
 import android.content.Context
 import androidx.room.Room
 import com.scorchedphoto.app.settings.AudioSettingsDao
+import com.scorchedphoto.app.settings.MatchDefaultsDao
 import com.scorchedphoto.app.settings.PhraseDao
 import com.scorchedphoto.app.settings.SettingsDatabase
 import com.scorchedphoto.app.tts.CustomVoiceDao
@@ -31,6 +32,7 @@ object DatabaseModule {
     fun provideSettingsDatabase(@ApplicationContext context: Context): SettingsDatabase =
         Room.databaseBuilder(context, SettingsDatabase::class.java, "settings.db")
             .addCallback(SettingsDatabase.callback)
+            .addMigrations(SettingsDatabase.MIGRATION_1_2)
             .build()
 
     @Provides
@@ -40,4 +42,8 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideAudioSettingsDao(database: SettingsDatabase): AudioSettingsDao = database.audioSettingsDao()
+
+    @Provides
+    @Singleton
+    fun provideMatchDefaultsDao(database: SettingsDatabase): MatchDefaultsDao = database.matchDefaultsDao()
 }

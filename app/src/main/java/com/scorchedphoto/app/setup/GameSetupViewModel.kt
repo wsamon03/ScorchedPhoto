@@ -3,6 +3,7 @@ package com.scorchedphoto.app.setup
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.scorchedphoto.app.game.SkyLook
+import com.scorchedphoto.app.settings.MatchDefaultsRepository
 import com.scorchedphoto.app.tts.CustomVoice
 import com.scorchedphoto.app.tts.CustomVoiceRepository
 import com.scorchedphoto.app.tts.DeathLineSpeaker
@@ -16,13 +17,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.random.Random
 
-private const val MIN_TANKS = 2
-private const val MAX_TANKS = 6
 private const val PITCH_RATE_MIN = 0.5f
 private const val PITCH_RATE_MAX = 2.0f
 
@@ -34,6 +34,7 @@ class GameSetupViewModel @Inject constructor(
     private val matchConfigRepository: MatchConfigRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
     private val customVoiceRepository: CustomVoiceRepository,
+    private val matchDefaultsRepository: MatchDefaultsRepository,
 ) : ViewModel() {
 
     /** Real voices this device's TTS engine has, for the setup screen's voice picker -
@@ -43,13 +44,18 @@ class GameSetupViewModel @Inject constructor(
      * initializers in declaration order, so a later declaration would still be null here. */
     val availableVoices: StateFlow<List<VoiceOption>> = deathLineSpeaker.availableVoices
 
+    // Seeded with the hardcoded baseline here (matching MatchDefaults()'s own fallback) so the
+    // screen never flashes empty/placeholder state - overwritten once init{} below has read
+    // the player's actual persisted starting values, which is normally near-instant (a single
+    // indexed Room row) but not synchronous, hence needing a placeholder at all.
     private val _tankConfigs = MutableStateFlow(defaultConfigs(MIN_TANKS))
     val tankConfigs: StateFlow<List<TankConfig>> = _tankConfigs.asStateFlow()
 
     // Null means "Random" is currently selected in the settings UI - resolved to one concrete
     // EdgeType (see commitAndStart) only once the match actually starts, so it's chosen fresh
     // per match but then stays fixed - never re-rolled mid-match, and never reaches MatchConfig/
-    // GameEngine as a live "random" value.
+    // GameEngine as a live "random" value. See _tankConfigs' own doc on the init{}-overwrite
+    // pattern this and the two properties below also follow.
     private val _wallType = MutableStateFlow<EdgeType?>(EdgeType.NONE)
     val wallType: StateFlow<EdgeType?> = _wallType.asStateFlow()
 
@@ -61,6 +67,22 @@ class GameSetupViewModel @Inject constructor(
     // FloorType.GROUND, today's only floor behavior, instead.
     private val _floorType = MutableStateFlow<FloorType?>(FloorType.GROUND)
     val floorType: StateFlow<FloorType?> = _floorType.asStateFlow()
+
+    /** Applies the player's persisted starting values (see [MatchDefaultsRepository]/title
+     * screen's own gear menu) exactly once, as soon as they're available - a fresh
+     * [GameSetupViewModel] is created every time this screen is (re)entered (it's nav-backstack-
+     * scoped, not a singleton), so this always reflects whatever was most recently saved,
+     * including changes made after this match's own roster/wall/ceiling/floor were already
+     * hand-edited on a previous visit to this screen within the same session. */
+    init {
+        viewModelScope.launch {
+            val defaults = matchDefaultsRepository.defaults.first()
+            _tankConfigs.value = defaultConfigs(defaults.playerCount)
+            _wallType.value = defaults.wallType
+            _ceilingType.value = defaults.ceilingType
+            _floorType.value = defaults.floorType
+        }
+    }
 
     /** User-saved voice/pitch/rate presets, persisted across app restarts and updates. */
     val customVoices: StateFlow<List<CustomVoice>> = customVoiceRepository.customVoices
