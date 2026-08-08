@@ -4,6 +4,7 @@ import com.scorchedphoto.engine.ai.CpuAimCalculator
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
+import com.scorchedphoto.engine.physics.POWER_SCALE
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.testTank
@@ -624,6 +625,85 @@ class GameEngineTest {
         val vyEnteringBounceTick = vyBeforeBounce + GRAVITY * (1f / 60f)
         assertEquals(-vyEnteringBounceTick * 0.98f, p.vy, 1f)
         assertEquals("expected the projectile clamped exactly onto the ceiling (y=0)", 0f, p.y, 0.01f)
+    }
+
+    @Test
+    fun `wall type Spring launches a weak hit at the guaranteed minimum (power 50) rather than 70 percent of its incoming speed`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        // Close enough to the wall (x) that a shallow-angled, low-power shot (angleDeg=135,
+        // power=10) still reaches it well before gravity arcs it back down to its own starting
+        // height - see the wall Reflective test above for the same up-and-toward-the-wall shape,
+        // here scaled down so a much weaker shot still clears the same margin.
+        val shooter = testTank(id = 1, ownerId = 1, x = 3f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, wallType = EdgeType.SPRING, rng = Random(1))
+        shooter.angleDeg = 135f // up and toward the near wall (x=0)
+        shooter.power = 10f // weak enough that 70% of its speed is well under the guaranteed minimum
+        engine.fire()
+
+        var prevVx = 0f
+        var prevVy = 0f
+        var bounced = false
+        var ticks = 0
+        while (!bounced && ticks < 200) {
+            val p = engine.projectiles.single()
+            prevVx = p.vx
+            prevVy = p.vy
+            engine.tick(1f / 60f)
+            if (engine.bounceEffects.isNotEmpty()) bounced = true
+            ticks++
+        }
+
+        assertTrue("expected the wall to launch the projectile", bounced)
+        // stepProjectile always runs before the wall-bounce dispatch, so the incoming speed the
+        // bounce itself sees already includes this tick's own gravity increment to vy.
+        val incomingSpeed = hypot(prevVx.toDouble(), (prevVy + GRAVITY * (1f / 60f)).toDouble()).toFloat()
+        val guaranteedMinimum = 50f * POWER_SCALE
+        assertTrue(
+            "expected this weak a hit's 70% retention to fall under the guaranteed minimum, or this test isn't exercising the branch it means to",
+            incomingSpeed * 0.7f < guaranteedMinimum,
+        )
+        val p = engine.projectiles.single()
+        assertEquals("expected the guaranteed minimum launch speed, directly away from the wall (positive = rightward)", guaranteedMinimum, p.vx, 1f)
+        assertEquals("expected vertical velocity reset to exactly 0, restarting gravity from a standstill", 0f, p.vy, 0.01f)
+    }
+
+    @Test
+    fun `wall type Spring launches a strong hit at 70 percent of its incoming speed once that exceeds the guaranteed minimum`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val shooter = testTank(id = 1, ownerId = 1, x = 900f)
+        val engine = GameEngine(terrain, listOf(shooter), maxWindMagnitude = 0f, wallType = EdgeType.SPRING, rng = Random(1))
+        shooter.angleDeg = 45f // up and toward the far wall (x=terrain.width)
+        shooter.power = 100f
+        engine.fire()
+
+        var prevVx = 0f
+        var prevVy = 0f
+        var bounced = false
+        var ticks = 0
+        while (!bounced && ticks < 200) {
+            val p = engine.projectiles.single()
+            prevVx = p.vx
+            prevVy = p.vy
+            engine.tick(1f / 60f)
+            if (engine.bounceEffects.isNotEmpty()) bounced = true
+            ticks++
+        }
+
+        assertTrue("expected the wall to launch the projectile", bounced)
+        val incomingSpeed = hypot(prevVx.toDouble(), (prevVy + GRAVITY * (1f / 60f)).toDouble()).toFloat()
+        val guaranteedMinimum = 50f * POWER_SCALE
+        assertTrue(
+            "expected this strong a hit's 70% retention to exceed the guaranteed minimum, or this test isn't exercising the branch it means to",
+            incomingSpeed * 0.7f > guaranteedMinimum,
+        )
+        val p = engine.projectiles.single()
+        assertEquals(
+            "expected 70% of the incoming speed, directly away from the wall (negative = leftward)",
+            -incomingSpeed * 0.7f,
+            p.vx,
+            5f,
+        )
+        assertEquals("expected vertical velocity reset to exactly 0, restarting gravity from a standstill", 0f, p.vy, 0.01f)
     }
 
     @Test

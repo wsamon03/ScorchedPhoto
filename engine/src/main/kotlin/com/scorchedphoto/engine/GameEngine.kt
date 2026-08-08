@@ -9,6 +9,7 @@ import com.scorchedphoto.engine.combat.WeaponType
 import com.scorchedphoto.engine.physics.GRAVITY
 import com.scorchedphoto.engine.physics.Projectile
 import com.scorchedphoto.engine.physics.Wind
+import com.scorchedphoto.engine.physics.POWER_SCALE
 import com.scorchedphoto.engine.physics.launchVelocity
 import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.physics.stepProjectile
@@ -407,9 +408,11 @@ class GameEngine(
      * something other than NONE for that edge. BLAST_STEEL detonates it in place, reusing the
      * existing impact pipeline wholesale; WRAP teleports it to the opposite edge with velocity
      * untouched for a wall, but detonates immediately at [ceilingWrapDepthY] for a ceiling
-     * (see the branch below for why); the remaining four types clamp the projectile exactly
-     * onto the boundary and reflect the relevant axis's velocity, scaled by a per-type "energy
-     * retention" multiplier.
+     * (see the branch below for why); of the remaining four types, a Spring *wall* is a special
+     * case handled by [applySpringWallLaunch] instead of the shared [applyBounceVelocity] path -
+     * see its own doc for why; every other combination (Padded/Rubber/Reflective on either edge,
+     * and Spring on the ceiling) clamps the projectile exactly onto the boundary and reflects
+     * the relevant axis's velocity, scaled by a per-type "energy retention" multiplier.
      */
     private fun handleEdgeBounce(iterator: MutableIterator<Projectile>, p: Projectile, edgeType: EdgeType, isWall: Boolean) {
         when (edgeType) {
@@ -446,10 +449,34 @@ class GameEngine(
                 } else {
                     p.y = 0f
                 }
-                applyBounceVelocity(p, edgeType, isVerticalAxis = !isWall)
+                if (edgeType == EdgeType.SPRING && isWall) {
+                    applySpringWallLaunch(p)
+                } else {
+                    applyBounceVelocity(p, edgeType, isVerticalAxis = !isWall)
+                }
                 activeBounceEffects += BounceEffect(p.x, p.y, edgeType)
             }
         }
+    }
+
+    /**
+     * A Spring *wall* (not ceiling or floor - those still go through [applyBounceVelocity])
+     * launches [p] directly horizontally, away from whichever wall it just hit, at whichever is
+     * faster of [SPRING_WALL_RETENTION] of its incoming speed or a plain shot fired at
+     * [SPRING_WALL_MIN_LAUNCH_POWER] (scaled the same way [launchVelocity] scales any other
+     * shot's power into speed) - so a weak hit still launches back out at a strong, reliable
+     * minimum, and a fast one launches back out even faster. `vy` is reset to exactly 0 rather
+     * than reflected, so gravity's downward pull restarts from a standstill exactly like a
+     * fresh shot's own arc, instead of carrying over whatever vertical motion the projectile
+     * had on the way in.
+     */
+    private fun applySpringWallLaunch(p: Projectile) {
+        val incomingSpeed = hypot(p.vx.toDouble(), p.vy.toDouble()).toFloat()
+        val minLaunchSpeed = SPRING_WALL_MIN_LAUNCH_POWER * POWER_SCALE
+        val speed = maxOf(incomingSpeed * SPRING_WALL_RETENTION, minLaunchSpeed)
+        val direction = if (p.x <= 0f) 1f else -1f
+        p.vx = speed * direction
+        p.vy = 0f
     }
 
     private fun velocityRetention(edgeType: EdgeType): Float = when (edgeType) {
@@ -1255,5 +1282,9 @@ class GameEngine(
         // Spring's own bounce guarantees - see applyBounceVelocity's own doc.
         private const val SPRING_MIN_LAUNCH_FRACTION = 0.25f
         private const val SPRING_DEFLECTION_MAX_DEGREES = 2f
+
+        // Spring *walls* only - see applySpringWallLaunch's own doc.
+        private const val SPRING_WALL_RETENTION = 0.7f
+        private const val SPRING_WALL_MIN_LAUNCH_POWER = 50f
     }
 }
