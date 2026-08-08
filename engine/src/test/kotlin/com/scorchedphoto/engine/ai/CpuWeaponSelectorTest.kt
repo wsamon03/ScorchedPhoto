@@ -53,7 +53,7 @@ class CpuWeaponSelectorTest {
     }
 
     @Test
-    fun `hard difficulty picks the most plentiful weapon that can still one-shot a low-health target`() {
+    fun `hard difficulty picks the softest single hit that still finishes a low-health target when ammo limits are tied`() {
         val target = testTank(id = 2, health = 20)
         val selected = CpuWeaponSelector.selectWeapon(
             target = target,
@@ -62,10 +62,13 @@ class CpuWeaponSelectorTest {
             ammoFor = unlimitedAmmo,
         )
         // Baby Missile (maxDamage 15) and Flak Burst (maxDamage 8, its own single pellet) can't
-        // finish a 20-health target; every other weapon that can (Standard Shell, Big Bertha,
-        // Cluster MIRV, Spread MIRV, Nuke, Napalm, Widowmaker) starts with less ammo than
-        // Standard Shell's 5 - the most expendable choice, so it's conserved for.
-        assertEquals(WeaponType.STANDARD_SHELL, selected)
+        // finish a 20-health target. Every other weapon that can (Standard Shell, Big Bertha,
+        // Cluster MIRV, Spread MIRV, Nuke, Napalm, Widowmaker) now shares the same flat
+        // ammoLimit (9, the economy feature's current placeholder cap - see WeaponCatalog), so
+        // conservationOrder's ammoLimit tier ties and falls through to its maxDamage tiebreak:
+        // whichever finishing weapon hits softest is the "most conserved" choice. Spread MIRV
+        // (24) is the softest of that group.
+        assertEquals(WeaponType.SPREAD_MIRV, selected)
     }
 
     @Test

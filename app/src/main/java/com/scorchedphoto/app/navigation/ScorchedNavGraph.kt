@@ -18,6 +18,7 @@ import com.scorchedphoto.app.settings.SettingsScreen
 import com.scorchedphoto.app.setup.GameSettingsScreen
 import com.scorchedphoto.app.setup.GameSetupScreen
 import com.scorchedphoto.app.setup.GameSetupViewModel
+import com.scorchedphoto.app.shop.ShopScreen
 import com.scorchedphoto.app.terrainpreview.TerrainPreviewScreen
 import com.scorchedphoto.app.tournament.MultiGameSetupScreen
 
@@ -49,7 +50,7 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
         }
         composable(Screen.GameSetup.route) {
             GameSetupScreen(
-                onStartMatch = { navController.navigate(Screen.PhotoSource.route) },
+                onStartMatch = { navController.navigate(Screen.Shop.route) },
                 onOpenSettings = { navController.navigate(Screen.GameSettings.route) },
             )
         }
@@ -57,6 +58,9 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
             val gameSetupEntry = remember(backStackEntry) { navController.getBackStackEntry(Screen.GameSetup.route) }
             val viewModel: GameSetupViewModel = hiltViewModel(gameSetupEntry)
             GameSettingsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+        }
+        composable(Screen.Shop.route) {
+            ShopScreen(onContinue = { navController.navigate(Screen.PhotoSource.route) })
         }
         composable(Screen.PhotoSource.route) {
             PhotoSourceScreen(onPhotoReady = { navController.navigate(Screen.PhotoCrop.route) })
@@ -95,6 +99,11 @@ fun ScorchedNavGraph(navController: NavHostController = rememberNavController())
                 onHome = {
                     navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.Home.route) { inclusive = true }
+                    }
+                },
+                onNextGame = {
+                    navController.navigate(Screen.Shop.route) {
+                        popUpTo(Screen.GameSetup.route)
                     }
                 },
             )

@@ -197,6 +197,39 @@ class GameEngineTest {
     }
 
     @Test
+    fun `startingAmmoOverride seeds exact per-tank counts, defaulting any missing weapon type to 0`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val b = testTank(id = 2, ownerId = 2, x = 700f)
+        val override = mapOf(
+            // b's id is deliberately absent from the override map entirely - not just missing
+            // one weapon type - to also cover that case below.
+            a.id to mapOf(WeaponType.STANDARD_SHELL to 3),
+        )
+        val engine = GameEngine(terrain, listOf(a, b), maxWindMagnitude = 0f, rng = Random(1), startingAmmoOverride = override)
+
+        assertEquals(3, engine.ammoFor(a.id, WeaponType.STANDARD_SHELL))
+        // Present in the override, but not for this weapon type - defaults to 0, not the
+        // catalog's own ammoLimit.
+        assertEquals(0, engine.ammoFor(a.id, WeaponType.BIG_BERTHA))
+        // Absent from the override map entirely - every finite-ammo weapon defaults to 0.
+        assertEquals(0, engine.ammoFor(b.id, WeaponType.STANDARD_SHELL))
+        // Baby Missile is unaffected either way - never gated by the override at all.
+        assertEquals(null, engine.ammoFor(a.id, WeaponType.BABY_MISSILE))
+    }
+
+    @Test
+    fun `a null startingAmmoOverride preserves the original free full-loadout behavior`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val a = testTank(id = 1, ownerId = 1, x = 300f)
+        val engine = GameEngine(terrain, listOf(a), maxWindMagnitude = 0f, rng = Random(1))
+
+        for (weapon in WeaponCatalog.all) {
+            assertEquals(weapon.ammoLimit, engine.ammoFor(a.id, weapon.type))
+        }
+    }
+
+    @Test
     fun `wind changes between turns when magnitude is nonzero`() {
         val terrain = flatTerrain(width = 1000, groundY = 500)
         val a = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)

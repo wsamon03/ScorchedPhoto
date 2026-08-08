@@ -25,6 +25,7 @@ fun VictoryScreen(
     onRematch: () -> Unit,
     onNewPhoto: () -> Unit,
     onHome: () -> Unit,
+    onNextGame: () -> Unit,
     viewModel: VictoryViewModel = hiltViewModel(),
 ) {
     LockScreenOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
@@ -79,7 +80,7 @@ fun VictoryScreen(
                         config = tournamentConfig,
                         modifier = Modifier.padding(top = 16.dp),
                     )
-                    Button(onClick = onRematch, modifier = Modifier.padding(top = 24.dp)) {
+                    Button(onClick = onNextGame, modifier = Modifier.padding(top = 24.dp)) {
                         Text("Next Game")
                     }
                     Button(onClick = goHome, modifier = Modifier.padding(top = 12.dp)) {

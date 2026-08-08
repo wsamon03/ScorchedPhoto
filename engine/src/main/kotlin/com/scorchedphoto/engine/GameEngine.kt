@@ -62,6 +62,17 @@ class GameEngine(
     val ceilingType: EdgeType = EdgeType.NONE,
     val floorType: FloorType = FloorType.GROUND,
     private val rng: Random = Random.Default,
+    // The :app economy/shop feature's purchased loadout, keyed by tank id - null (the default)
+    // preserves this engine's original behavior exactly: every tank starts with a free full
+    // ammoLimit stock of every finite-ammo weapon, unconditionally. This is deliberate for
+    // backward compatibility - every engine test constructs GameEngine without ever passing
+    // this, and must keep getting that same free-loadout behavior. Only :app's GameViewModel,
+    // once wired to the economy feature, ever passes a real map here. When non-null, each
+    // tank's starting ammo for a given finite-ammo weapon type is exactly what
+    // startingAmmoOverride[tank.id] says (missing entries default to 0, i.e. "not purchased") -
+    // Baby Missile is unaffected either way, since it's excluded from ammoRemaining entirely
+    // (see below) by virtue of its null ammoLimit.
+    private val startingAmmoOverride: Map<Int, Map<WeaponType, Int>>? = null,
 ) {
     // Shuffled once per match so turn order isn't always the order tanks were configured in -
     // tanks itself (used everywhere else: rendering, collision, gravity, etc.) stays in its
@@ -70,8 +81,17 @@ class GameEngine(
 
     private val ammoRemaining: MutableMap<Int, MutableMap<WeaponType, Int>> =
         tanks.associateTo(mutableMapOf()) { tank ->
-            tank.id to WeaponCatalog.all.filter { it.ammoLimit != null }
-                .associateTo(mutableMapOf()) { it.type to it.ammoLimit!! }
+            val finiteAmmoTypes = WeaponCatalog.all.filter { it.ammoLimit != null }
+            // Distinguish "the whole override feature is off" (startingAmmoOverride itself is
+            // null - the legacy free-loadout default) from "it's on, but this particular tank
+            // has no entry in it" (a real tank that simply purchased nothing - every weapon
+            // defaults to 0, not the catalog's own ammoLimit).
+            tank.id to if (startingAmmoOverride == null) {
+                finiteAmmoTypes.associateTo(mutableMapOf()) { it.type to it.ammoLimit!! }
+            } else {
+                val purchased = startingAmmoOverride[tank.id].orEmpty()
+                finiteAmmoTypes.associateTo(mutableMapOf()) { it.type to (purchased[it.type] ?: 0) }
+            }
         }
 
     private val activeProjectiles = mutableListOf<Projectile>()
@@ -101,6 +121,24 @@ class GameEngine(
      * doc. Read by :app's tournament scoring once a match ends; otherwise unused by the engine
      * itself beyond producing it. */
     val deathLog: List<DeathRecord> get() = recordedDeaths
+
+    private val damageDealtByOwnerMutable = mutableMapOf<Int, Int>()
+
+    /** Cumulative real health removed from an enemy tank this match, credited to whichever
+     * owner fired the shot (or applied the damage-over-time tick) - see [creditDamage], the
+     * only writer. Self-damage is never credited. Read by :app's economy feature
+     * ([com.scorchedphoto.engine.economy.MatchEarnings]) once a match ends; otherwise unused by
+     * the engine itself. */
+    val damageDealtByOwner: Map<Int, Int> get() = damageDealtByOwnerMutable
+
+    /** Credits [amount] of real damage dealt toward [shooterOwnerId]'s running total for this
+     * match - a no-op if there's no shooter to credit, the shooter hit their own tank (excluded
+     * so self-damage can't be farmed for economy earnings), or [amount] isn't positive (a miss,
+     * or a fully-absorbed hit). */
+    private fun creditDamage(shooterOwnerId: Int?, victimOwnerId: Int, amount: Int) {
+        if (shooterOwnerId == null || shooterOwnerId == victimOwnerId || amount <= 0) return
+        damageDealtByOwnerMutable[shooterOwnerId] = (damageDealtByOwnerMutable[shooterOwnerId] ?: 0) + amount
+    }
 
     var phase: MatchPhase = MatchPhase.AIMING
         private set
@@ -638,12 +676,15 @@ class GameEngine(
             when {
                 damage == null -> {
                     if (weapon.maxDamage > 0) {
+                        creditDamage(shooterOwnerId, tank.ownerId, tank.health)
                         tank.health = 0
                         killOrDrown(tank, tank.creditOwnerId, impactId)
                     }
                 }
                 damage > 0 -> {
-                    tank.health = (tank.health - damage).coerceAtLeast(0)
+                    val newHealth = (tank.health - damage).coerceAtLeast(0)
+                    creditDamage(shooterOwnerId, tank.ownerId, tank.health - newHealth)
+                    tank.health = newHealth
                     if (tank.health == 0) {
                         killOrDrown(tank, tank.creditOwnerId, impactId)
                     } else if (weapon.dotRounds > 0) {
@@ -841,7 +882,9 @@ class GameEngine(
     private fun applyPendingDotDamage() {
         for (tank in tanks) {
             if (!tank.alive || tank.dotRoundsRemaining <= 0) continue
-            tank.health = (tank.health - tank.dotDamagePerRound).coerceAtLeast(0)
+            val newHealth = (tank.health - tank.dotDamagePerRound).coerceAtLeast(0)
+            creditDamage(tank.dotSourceOwnerId, tank.ownerId, tank.health - newHealth)
+            tank.health = newHealth
             tank.dotRoundsRemaining--
             if (tank.health == 0) {
                 // Whoever applied this DoT gets credit, not whatever tank.creditOwnerId

@@ -9,7 +9,8 @@ object WeaponCatalog {
         displayName = "Standard Shell",
         blastRadius = 28f,
         maxDamage = 35,
-        ammoLimit = 5,
+        ammoLimit = 9,
+        price = 10,
     )
 
     val BIG_BERTHA = Weapon(
@@ -17,7 +18,8 @@ object WeaponCatalog {
         displayName = "Big Bertha",
         blastRadius = 55f,
         maxDamage = 60,
-        ammoLimit = 1,
+        ammoLimit = 9,
+        price = 80,
     )
 
     val CLUSTER_MIRV = Weapon(
@@ -25,7 +27,8 @@ object WeaponCatalog {
         displayName = "Cluster MIRV",
         blastRadius = 26f,
         maxDamage = 30,
-        ammoLimit = 1,
+        ammoLimit = 9,
+        price = 90,
         childCount = 4,
         childSpreadDegrees = 40f,
         splitPattern = SplitPattern.RADIAL_FAN,
@@ -47,7 +50,8 @@ object WeaponCatalog {
         displayName = "Spread MIRV",
         blastRadius = 22f,
         maxDamage = 24,
-        ammoLimit = 1,
+        ammoLimit = 9,
+        price = 85,
         childCount = 5,
         splitPattern = SplitPattern.HORIZONTAL_LINE,
         horizontalSpreadSpeed = 90f,
@@ -61,7 +65,8 @@ object WeaponCatalog {
         displayName = "Nuke",
         blastRadius = BIG_BERTHA.blastRadius * 4f,
         maxDamage = 80,
-        ammoLimit = 1,
+        ammoLimit = 9,
+        price = 220,
         dotFraction = 0.10f,
         dotRounds = 3,
     )
@@ -75,7 +80,8 @@ object WeaponCatalog {
         displayName = "Earthmover",
         blastRadius = 40f,
         maxDamage = 0,
-        ammoLimit = 2,
+        ammoLimit = 9,
+        price = 25,
         terrainEffect = TerrainEffect.FILL,
     )
 
@@ -88,7 +94,8 @@ object WeaponCatalog {
         displayName = "Napalm",
         blastRadius = 32f,
         maxDamage = 25,
-        ammoLimit = 2,
+        ammoLimit = 9,
+        price = 70,
         dotFraction = 0.10f,
         dotRounds = 4,
         dotIsFire = true,
@@ -101,7 +108,8 @@ object WeaponCatalog {
         displayName = "Widowmaker",
         blastRadius = 10f,
         maxDamage = 90,
-        ammoLimit = 2,
+        ammoLimit = 9,
+        price = 110,
     )
 
     /** A wide, tight radial spray of many weak pellets (see [com.scorchedphoto.engine.GameEngine.splitMirv],
@@ -112,7 +120,8 @@ object WeaponCatalog {
         displayName = "Flak Burst",
         blastRadius = 9f,
         maxDamage = 8,
-        ammoLimit = 4,
+        ammoLimit = 9,
+        price = 20,
         childCount = 9,
         childSpreadDegrees = 70f,
         splitPattern = SplitPattern.RADIAL_FAN,

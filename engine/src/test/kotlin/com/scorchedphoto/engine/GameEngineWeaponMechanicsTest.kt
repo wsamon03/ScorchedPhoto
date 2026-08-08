@@ -151,6 +151,98 @@ class GameEngineWeaponMechanicsTest {
         assertEquals(healthAfterThreeRounds, victim.health)
     }
 
+    // --- Economy: damageDealtByOwner tracking ----------------------------------------------
+
+    @Test
+    fun `damageDealtByOwner credits the shooter for splash damage dealt to an enemy`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 700f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        val healthBefore = victim.health
+
+        fireAtX(engine, victim.x)
+
+        // Not necessarily an exact match: the same blast that damages the victim can also carve
+        // ground out from under them, adding a little uncredited fall damage on top of the
+        // weapon's own blast damage (deliberately excluded from creditDamage - see its own
+        // doc) - so credited damage is real and positive, but only ever <= the victim's total
+        // health lost, never more.
+        val totalHealthLost = healthBefore - victim.health
+        val credited = engine.damageDealtByOwner[shooter.ownerId] ?: 0
+        assertTrue("expected the shot to have actually damaged the victim", totalHealthLost > 0)
+        assertTrue("expected the shooter to be credited for some of the damage", credited > 0)
+        assertTrue(
+            "expected credited damage ($credited) to never exceed total health lost ($totalHealthLost)",
+            credited <= totalHealthLost,
+        )
+    }
+
+    @Test
+    fun `damageDealtByOwner never credits self-inflicted damage`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 900f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val healthBefore = shooter.health
+
+        // A steep, weak shot arcs right back down onto the shooter's own position - a
+        // guaranteed self-hit (see GameEngineTest's own ammoLimit test for the same trick,
+        // deliberately avoided there but deliberately used here).
+        shooter.angleDeg = 80f
+        shooter.power = 5f
+        engine.fire()
+        runUntilNotResolving(engine)
+
+        assertTrue("expected the shooter to have actually damaged itself", shooter.health < healthBefore)
+        assertEquals(null, engine.damageDealtByOwner[shooter.ownerId])
+    }
+
+    @Test
+    fun `damageDealtByOwner credits only the tank's actual health removed, not the weapon's full maxDamage, on an overkill hit`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 700f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        // A single point of health left - any real hit is a massive overkill relative to
+        // WIDOWMAKER's own 90 maxDamage, so a credit of 90 (or anything above 1) would mean
+        // the engine wrongly credited the weapon's raw power instead of what was actually
+        // removed.
+        victim.health = 1
+        shooter.currentWeapon = WeaponType.WIDOWMAKER
+        fireAtX(engine, victim.x)
+
+        assertFalse(victim.alive)
+        assertEquals(1, engine.damageDealtByOwner[shooter.ownerId])
+    }
+
+    @Test
+    fun `damageDealtByOwner credits a Nuke DoT tick to dotSourceOwnerId, on top of the initial blast`() {
+        val terrain = flatTerrain(width = 1000, groundY = 500)
+        val t1 = testTank(id = 1, ownerId = 1, x = 300f, health = 1000)
+        val t2 = testTank(id = 2, ownerId = 2, x = 700f, health = 1000)
+        val engine = GameEngine(terrain, listOf(t1, t2), maxWindMagnitude = 0f, rng = Random(1))
+        val shooter = engine.currentTank!!
+        val victim = if (shooter === t1) t2 else t1
+        shooter.currentWeapon = WeaponType.NUKE
+        fireAtX(engine, victim.x + Tank.RADIUS + 5f)
+        shooter.currentWeapon = WeaponType.STANDARD_SHELL
+
+        val damageAfterBlast = engine.damageDealtByOwner[shooter.ownerId]
+        assertTrue("expected the initial blast to already be credited", (damageAfterBlast ?: 0) > 0)
+        assertTrue("expected the blast to leave a pending radiation tick to test", victim.dotRoundsRemaining > 0)
+
+        val dotDamage = victim.dotDamagePerRound
+        fireSafeFillerShot(engine) // completes round 1, applies the first DoT tick
+
+        assertEquals(damageAfterBlast!! + dotDamage, engine.damageDealtByOwner[shooter.ownerId])
+    }
+
     @Test
     fun `a Nuke kill never leaves a pending radiation tick on the dead tank`() {
         // 400px apart - close enough that a 45-degree shot can actually reach at an

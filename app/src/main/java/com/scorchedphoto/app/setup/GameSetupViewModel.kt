@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.scorchedphoto.app.game.SkyLook
 import com.scorchedphoto.app.settings.MatchDefaultsRepository
+import com.scorchedphoto.app.shop.EconomyRepository
 import com.scorchedphoto.app.tournament.TournamentRepository
 import com.scorchedphoto.app.tournament.TournamentState
 import com.scorchedphoto.app.tournament.TournamentTankState
@@ -14,6 +15,7 @@ import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.EdgeType
 import com.scorchedphoto.engine.FloorType
 import com.scorchedphoto.engine.ai.Difficulty
+import com.scorchedphoto.engine.economy.EconomyConstants
 import com.scorchedphoto.engine.tanks.TankShape
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +41,7 @@ class GameSetupViewModel @Inject constructor(
     private val customVoiceRepository: CustomVoiceRepository,
     private val matchDefaultsRepository: MatchDefaultsRepository,
     private val tournamentRepository: TournamentRepository,
+    private val economyRepository: EconomyRepository,
 ) : ViewModel() {
 
     /** Real voices this device's TTS engine has, for the setup screen's voice picker -
@@ -199,7 +202,12 @@ class GameSetupViewModel @Inject constructor(
      * [com.scorchedphoto.app.result.VictoryScreen] back into [com.scorchedphoto.app.game.GameScreen]
      * without revisiting setup), so `state == null` here reliably means "this is the
      * tournament's first game," guarding against ever re-seeding (and so discarding) an
-     * already-in-progress tournament's standings. */
+     * already-in-progress tournament's standings. The same "is this a brand-new roster" check
+     * also gates seeding every tank's starting [EconomyRepository] balance - generalized to
+     * cover an ordinary Single Game too (which has no [TournamentState] at all), since a fresh
+     * roster needs a fresh starting budget either way; between rounds of an ongoing tournament,
+     * balances instead carry forward and accumulate (see [com.scorchedphoto.app.game.GameViewModel]'s
+     * own end-of-match earnings crediting). */
     fun commitAndStart() {
         val resolvedWallType = _wallType.value ?: EdgeType.entries.random()
         val resolvedCeilingType = _ceilingType.value ?: EdgeType.entries.random()
@@ -214,11 +222,16 @@ class GameSetupViewModel @Inject constructor(
             terrainColor = TERRAIN_COLOR_PALETTE.random(),
         )
         val tournamentConfig = tournamentRepository.config
-        if (tournamentConfig != null && tournamentRepository.state == null) {
-            tournamentRepository.state = TournamentState(
-                tournamentConfig,
-                tankConfigs.mapIndexed { index, config -> TournamentTankState(index, config.name, config.color) }.toMutableList(),
-            )
+        val isFirstMatchOfThisGame = tournamentConfig == null || tournamentRepository.state == null
+        if (isFirstMatchOfThisGame) {
+            economyRepository.clear()
+            tankConfigs.indices.forEach { index -> economyRepository.balances[index] = EconomyConstants.STARTING_BUDGET }
+            if (tournamentConfig != null) {
+                tournamentRepository.state = TournamentState(
+                    tournamentConfig,
+                    tankConfigs.mapIndexed { index, config -> TournamentTankState(index, config.name, config.color) }.toMutableList(),
+                )
+            }
         }
     }
 

@@ -31,6 +31,10 @@ data class Weapon(
     val blastRadius: Float,
     val maxDamage: Int,
     val ammoLimit: Int? = null,
+    // Cost per single unit of ammo in the :app economy/shop feature - see WeaponCatalog,
+    // com.scorchedphoto.engine.ai.CpuShopper, and :app's shop package. 0 for Baby Missile
+    // (never purchasable/gated - always unlimited) and TANK_EXPLOSION (never fired/selected).
+    val price: Int = 0,
     val childCount: Int = 1,
     // RADIAL_FAN only - the full arc children fan out across, centered on the parent's own
     // current heading at the moment of split (see splitMirv).

@@ -1,6 +1,7 @@
 package com.scorchedphoto.app.result
 
 import androidx.lifecycle.ViewModel
+import com.scorchedphoto.app.shop.EconomyRepository
 import com.scorchedphoto.app.tournament.TournamentConfig
 import com.scorchedphoto.app.tournament.TournamentRepository
 import com.scorchedphoto.app.tournament.TournamentTankState
@@ -11,6 +12,7 @@ import javax.inject.Inject
 class VictoryViewModel @Inject constructor(
     private val matchResultRepository: MatchResultRepository,
     private val tournamentRepository: TournamentRepository,
+    private val economyRepository: EconomyRepository,
 ) : ViewModel() {
     val winners: List<MatchWinner> get() = matchResultRepository.winners
 
@@ -27,8 +29,10 @@ class VictoryViewModel @Inject constructor(
     /** Clears any tournament state - called whenever the player leaves back to the title
      * screen from here, whether quitting an in-progress tournament or leaving after one just
      * finished, so it can never bleed into a later Single Game or a new tournament. A no-op
-     * when no tournament was active. */
+     * when no tournament was active. Also clears [EconomyRepository] - a stale balance/loadout
+     * must never bleed forward the same way stale tournament state can't. */
     fun onHome() {
         tournamentRepository.clear()
+        economyRepository.clear()
     }
 }

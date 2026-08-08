@@ -26,9 +26,9 @@ class WeaponCatalogTest {
 
     @Test
     fun `standard shell, big bertha and cluster MIRV have limited starting ammo`() {
-        assertEquals(5, WeaponCatalog.STANDARD_SHELL.ammoLimit)
-        assertEquals(1, WeaponCatalog.BIG_BERTHA.ammoLimit)
-        assertEquals(1, WeaponCatalog.CLUSTER_MIRV.ammoLimit)
+        assertEquals(9, WeaponCatalog.STANDARD_SHELL.ammoLimit)
+        assertEquals(9, WeaponCatalog.BIG_BERTHA.ammoLimit)
+        assertEquals(9, WeaponCatalog.CLUSTER_MIRV.ammoLimit)
     }
 
     @Test

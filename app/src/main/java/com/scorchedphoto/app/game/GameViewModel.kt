@@ -10,6 +10,7 @@ import com.scorchedphoto.app.settings.PhraseCategory
 import com.scorchedphoto.app.settings.PhraseRepository
 import com.scorchedphoto.app.setup.MatchConfigRepository
 import com.scorchedphoto.app.setup.TankConfig
+import com.scorchedphoto.app.shop.EconomyRepository
 import com.scorchedphoto.app.terrainpreview.TerrainRepository
 import com.scorchedphoto.app.tournament.TournamentRepository
 import com.scorchedphoto.app.tournament.TournamentScorer
@@ -18,6 +19,7 @@ import com.scorchedphoto.app.tts.VoiceOption
 import com.scorchedphoto.engine.GameEngine
 import com.scorchedphoto.engine.combat.WeaponCatalog
 import com.scorchedphoto.engine.combat.WeaponType
+import com.scorchedphoto.engine.economy.MatchEarnings
 import com.scorchedphoto.engine.physics.maxPowerForHealth
 import com.scorchedphoto.engine.tanks.Tank
 import com.scorchedphoto.engine.tanks.TankPlacement
@@ -39,6 +41,7 @@ class GameViewModel @Inject constructor(
     phraseRepository: PhraseRepository,
     private val matchResultRepository: MatchResultRepository,
     private val tournamentRepository: TournamentRepository,
+    private val economyRepository: EconomyRepository,
     private val deathLineSpeaker: DeathLineSpeaker,
     val soundController: GameSoundController,
 ) : ViewModel() {
@@ -132,12 +135,20 @@ class GameViewModel @Inject constructor(
             )
         }
 
+        // Owner id and tank id are always the same value in this engine (see the Tank(...)
+        // construction above), so economyRepository.purchasedAmmo's ownerId keys already line
+        // up with GameEngine's own tank-id-keyed startingAmmoOverride - no remapping needed,
+        // just narrowed to whichever tanks are actually in this round's roster.
+        val startingAmmoOverride = activeConfigs.associate { (originalIndex, _) ->
+            originalIndex to (economyRepository.purchasedAmmo[originalIndex] ?: emptyMap())
+        }
         engine = GameEngine(
             heightMap,
             tanks,
             wallType = matchConfig.wallType,
             ceilingType = matchConfig.ceilingType,
             floorType = matchConfig.floorType,
+            startingAmmoOverride = startingAmmoOverride,
         )
         voiceSettings = activeConfigs.associate { (originalIndex, config) ->
             originalIndex to TankVoiceSettings(config.voiceId, config.pitch, config.speechRate)
@@ -184,6 +195,19 @@ class GameViewModel @Inject constructor(
                 tournamentRepository.state?.let { tournamentState ->
                     tournamentRepository.overallWinnerOwnerId =
                         TournamentScorer.score(tournamentState, engine.deathLog, winResult.winningOwnerIds)
+                }
+                // Runs for every match, tournament or not - harmless for an ordinary Single
+                // Game, since its shop never reappears to spend the credited balance, but keeps
+                // this one code path uniform rather than special-cased on tournament state.
+                val aliveOwnerIds = engine.tanks.filter { it.alive }.map { it.ownerId }.toSet()
+                val earnings = MatchEarnings.compute(
+                    allOwnerIds = engine.tanks.map { it.ownerId },
+                    aliveOwnerIds = aliveOwnerIds,
+                    deathLog = engine.deathLog,
+                    damageDealtByOwner = engine.damageDealtByOwner,
+                )
+                for ((ownerId, amount) in earnings) {
+                    economyRepository.balances[ownerId] = (economyRepository.balances[ownerId] ?: 0) + amount
                 }
             }
         }
