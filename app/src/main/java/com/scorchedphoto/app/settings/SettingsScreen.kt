@@ -114,7 +114,12 @@ fun SettingsScreen(
                 onSelect = viewModel::setDefaultFloorType,
             )
 
-            Button(onClick = onBack, modifier = Modifier.padding(top = 24.dp)) {
+            Button(
+                onClick = onBack,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 24.dp),
+            ) {
                 Text("Back")
             }
         }
