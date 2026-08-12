@@ -32,11 +32,33 @@ object MatchEarnings {
             .groupingBy { it.killedByOwnerId!! }
             .eachCount()
 
+        // Null (absent) means "still alive when the match ended" - ranks later than any real
+        // death turn, the same way DeathRecord.turnNumber already orders deaths within a match.
+        val deathTurnByOwner: Map<Int, Int> = deathLog.associate { it.ownerId to it.turnNumber }
+
+        // True if [a] left the match strictly later than [b] did - a real "outsurvive," not a
+        // simultaneous ("tied") death, and not two tanks that both survived to the end (that's
+        // a tie for the win, not either one outsurviving the other).
+        fun outlived(a: Int, b: Int): Boolean {
+            val turnA = deathTurnByOwner[a]
+            val turnB = deathTurnByOwner[b]
+            return when {
+                turnA == null && turnB == null -> false
+                turnA == null -> true
+                turnB == null -> false
+                else -> turnA > turnB
+            }
+        }
+
+        val isSoleSurvivor = aliveOwnerIds.size == 1
+
         return allOwnerIds.associateWith { ownerId ->
             var earnings = EconomyConstants.PARTICIPATION_BASE
-            if (ownerId in aliveOwnerIds) earnings += EconomyConstants.SURVIVAL_BONUS
             earnings += EconomyConstants.KILL_BONUS * (kills[ownerId] ?: 0)
             earnings += floor(EconomyConstants.DAMAGE_TO_CURRENCY_RATE * (damageDealtByOwner[ownerId] ?: 0)).toInt()
+            val outsurvivedCount = allOwnerIds.count { other -> other != ownerId && outlived(ownerId, other) }
+            earnings += EconomyConstants.OUTSURVIVE_BONUS * outsurvivedCount
+            if (isSoleSurvivor && ownerId in aliveOwnerIds) earnings += EconomyConstants.LAST_SURVIVOR_BONUS
             earnings
         }
     }

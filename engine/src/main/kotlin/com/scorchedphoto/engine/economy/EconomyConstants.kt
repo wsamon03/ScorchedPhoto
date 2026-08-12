@@ -15,9 +15,15 @@ object EconomyConstants {
     /** Awarded to every tank in the roster for simply having played the match, win or lose. */
     const val PARTICIPATION_BASE = 20
 
-    /** Awarded on top of [PARTICIPATION_BASE] to a tank still alive when the match's
-     * [com.scorchedphoto.engine.turns.WinResult] resolves. */
-    const val SURVIVAL_BONUS = 200
+    /** Awarded per other tank in the match an owner outlives - strictly outlives, not a
+     * simultaneous ("tied") death - regardless of who (if anyone) actually killed it. See
+     * [MatchEarnings] for the full pairwise comparison. */
+    const val OUTSURVIVE_BONUS = 30
+
+    /** Awarded on top of [OUTSURVIVE_BONUS] to the sole tank still alive when the match's
+     * [com.scorchedphoto.engine.turns.WinResult] resolves - not awarded on a multi-survivor
+     * tie for the win. */
+    const val LAST_SURVIVOR_BONUS = 30
 
     /** Awarded per tank kill credited to an owner (see [com.scorchedphoto.engine.DeathRecord.killedByOwnerId]) -
      * a suicide (an owner credited with their own death) never counts. */
